@@ -79,8 +79,24 @@ drop an organization.
 Typically sent by the hourly schedule. The run first executes the
 [contracts process](#contracts-process) and uses the conversation ids it
 finds, grouped by each contract's organization. The process is imported only
-for these runs, so other flows don't load polars. Any other `ids_source`
-value fails the run before any file is touched.
+for these runs, so other flows don't load polars.
+
+### Ids from the Genesys conversations download
+
+```json
+{"tag": "surveys", "ids_source": "conversations_details", "date": "2026-08-13"}
+```
+
+A separate process downloads conversation details into
+`augusta-nexa-<env>-landing/transacciones/genesys/api/conversations_details/org_id=<N>/year=YYYY/month=MM/day=DD/`.
+The run reads that `date`'s files for every `org_id=` folder (`org_id=1` →
+`org-1`) and collects each file's `endpoint[].conversationId`. Nothing is
+transformed or written, and the files are never modified or deleted: they
+belong to the download process. Files that can't be read, or that have no
+`endpoint` list, are skipped and listed in `conversations_details.skipped_files`.
+`date` is required, as `YYYY-MM-DD`.
+
+An unknown `ids_source` value fails the run before any file is touched.
 
 ## Payload
 
@@ -215,6 +231,8 @@ All optional.
 | `RESOURCE_NAME` | `augusta-nexa-<env>-genesys-api-unitary-request` | Name in the runtime-control log (token cache). |
 | `CONTRACTS_PREFIX` | `contracts/entrada/transacciones/empatia/transcripciones/` | Contracts process: every `.json` under it is a contract. |
 | `CONTRACT_KEY` | *(unset)* | Contracts process: pin the run to this one contract. |
+| `CONVERSATIONS_DETAILS_BUCKET` | `augusta-nexa-<env>-landing` | Conversations-download source: the bucket it writes to. Logical or full name. |
+| `CONVERSATIONS_DETAILS_PREFIX` | `transacciones/genesys/api/conversations_details/` | The folder holding the `org_id=<N>/year=/month=/day=` partitions. |
 
 ## Deployment
 
@@ -236,6 +254,8 @@ All optional.
     discovery); `s3:ListBucket`, `s3:GetObject` and `s3:DeleteObject` on
     `augusta-nexa-<env>-providers-landing`; `s3:PutObject` on
     `augusta-nexa-<env>-refined/*`
+  - conversations-download source: `s3:ListBucket` and `s3:GetObject` on
+    `augusta-nexa-<env>-landing` (read-only)
   - `ssm:GetParametersByPath` on `/augusta-nexa-<env>/genesys/api/*`
   - `secretsmanager:ListSecrets` (`*`) and `secretsmanager:GetSecretValue` on that prefix
   - whatever `runtime_control` needs on `augusta-nexa-<env>-runtime-data`

@@ -12,7 +12,10 @@ token, regional base_url and a request template for every stage of the flow
 
 With `"ids_source": "contracts"` the run first executes the contracts process
 -- transcription files to parquet, conversation ids grouped by each contract's
-organization -- and uses those ids.
+organization -- and uses those ids. With `"ids_source": "conversations_details"`
+it reads the conversation ids the Genesys conversations download left in the
+landing bucket for the event's `date`, grouped by their org_id= folder, and
+leaves those files untouched.
 
 The payload is written to the logs bucket under a key holding the tag and
 this invocation's execution id -- Unitary Status and Unitary Download read it
@@ -29,6 +32,7 @@ import boto3
 
 import src.s3_utils as s3_utils
 from src.config import Settings, load_settings
+from src.conversations_details import collect_conversation_ids, parse_date
 from src.endpoints import load_endpoint_catalog, select_stages
 from src.payload import build_organization_entry, build_payload, output_base_path
 from src.sources import EventError, resolve_ids_by_organization, resolve_tag
@@ -38,6 +42,8 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 CONTRACTS_IDS_SOURCE = "contracts"
+CONVERSATIONS_DETAILS_IDS_SOURCE = "conversations_details"
+IDS_SOURCES = (CONTRACTS_IDS_SOURCE, CONVERSATIONS_DETAILS_IDS_SOURCE)
 
 
 def _server_key(organization_id: str) -> str:
@@ -46,20 +52,25 @@ def _server_key(organization_id: str) -> str:
 
 
 def _resolve_ids(s3_client, settings: Settings, event: dict, execution_id: str):
-    """(ids by organization, contracts-process summary or None).
+    """(ids by organization, source summary or None).
 
+    Without `ids_source` the ids come from the event itself. With one, they come
+    from that process, and its summary goes into the response under its name.
     The contracts process is imported here, not at module level: it's the only
     path that needs polars, so the other flows never load it.
     """
     ids_source = event.get("ids_source")
     if ids_source is None:
         return resolve_ids_by_organization(s3_client, settings, event), None
-    if ids_source != CONTRACTS_IDS_SOURCE:
-        raise EventError(f"Unknown ids_source {ids_source!r}; expected {CONTRACTS_IDS_SOURCE!r}")
 
-    from src.contracts_process import run_contracts
+    if ids_source == CONTRACTS_IDS_SOURCE:
+        from src.contracts_process import run_contracts
 
-    run = run_contracts(s3_client, settings, execution_id)
+        run = run_contracts(s3_client, settings, execution_id)
+    elif ids_source == CONVERSATIONS_DETAILS_IDS_SOURCE:
+        run = collect_conversation_ids(s3_client, settings, parse_date(event.get("date")))
+    else:
+        raise EventError(f"Unknown ids_source {ids_source!r}; expected one of {sorted(IDS_SOURCES)}")
     return run["ids_by_organization"], run["summary"]
 
 
@@ -132,7 +143,7 @@ def handler(event, context):
     # Validate the tag against the catalog before reading ids -- and before the
     # contracts process deletes any source files -- so a typo'd tag fails fast.
     stages = select_stages(load_endpoint_catalog(s3_client, settings), tag)
-    ids_by_organization, contracts_summary = _resolve_ids(s3_client, settings, event, execution_id)
+    ids_by_organization, source_summary = _resolve_ids(s3_client, settings, event, execution_id)
     logger.info("Tag %s: stages %s, %d organization(s)", tag, list(stages), len(ids_by_organization))
 
     organizations, failed = _build_organizations(settings, ids_by_organization, stages, tag)
@@ -149,6 +160,6 @@ def handler(event, context):
         "failed_organizations": failed,
         **payload,
     }
-    if contracts_summary is not None:
-        response["contracts"] = contracts_summary
+    if source_summary is not None:
+        response[event["ids_source"]] = source_summary
     return response

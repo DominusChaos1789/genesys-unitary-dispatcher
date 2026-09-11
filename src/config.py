@@ -16,6 +16,9 @@ DEFAULT_PAYLOAD_LOG_KEY_TEMPLATE = (
 )
 # Every .json under this prefix is a contract, one per provider/operation pair.
 DEFAULT_CONTRACTS_PREFIX = "contracts/entrada/transacciones/empatia/transcripciones/"
+# Where the Genesys conversations download leaves its files:
+# <prefix>org_id=<N>/year=YYYY/month=MM/day=DD/*.json
+DEFAULT_CONVERSATIONS_DETAILS_PREFIX = "transacciones/genesys/api/conversations_details/"
 
 
 def normalize_env_token(value: str) -> str:
@@ -62,6 +65,10 @@ class Settings:
     # that single contract instead.
     contracts_prefix: str
     contract_key: str
+    # Conversations-details ids source: the bucket and prefix the Genesys
+    # conversations download writes to.
+    conversations_details_bucket: str
+    conversations_details_prefix: str
 
     def resolve_bucket(self, name: str) -> str:
         """ "landing" -> "augusta-nexa-dev-landing"; full names pass through."""
@@ -95,4 +102,8 @@ def load_settings() -> Settings:
         resource_name=os.environ.get("RESOURCE_NAME", f"{stack}-genesys-api-unitary-request"),
         contracts_prefix=os.environ.get("CONTRACTS_PREFIX", DEFAULT_CONTRACTS_PREFIX),
         contract_key=os.environ.get("CONTRACT_KEY", ""),
+        conversations_details_bucket=bucket("CONVERSATIONS_DETAILS_BUCKET", "landing"),
+        conversations_details_prefix=os.environ.get(
+            "CONVERSATIONS_DETAILS_PREFIX", DEFAULT_CONVERSATIONS_DETAILS_PREFIX
+        ),
     )

@@ -91,3 +91,16 @@ def test_delete_objects_with_no_keys_makes_no_call():
             raise AssertionError("no keys, no call")
 
     assert s3_utils.delete_objects(NoCalls(), BUCKET, []) == []
+
+
+def test_list_common_prefixes_returns_the_folders_directly_under_a_prefix(aws):
+    s3 = aws["s3"]
+    for key in (
+        "root/org_id=2/year=2026/a.json",
+        "root/org_id=1/year=2026/b.json",
+        "root/org_id=1/c.json",
+        "root/file.json",
+    ):
+        s3.put_object(Bucket=BUCKET, Key=key, Body=b"{}")
+
+    assert s3_utils.list_common_prefixes(s3, BUCKET, "root/") == ["root/org_id=1/", "root/org_id=2/"]

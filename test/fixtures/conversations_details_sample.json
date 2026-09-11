@@ -1,0 +1,62 @@
+{
+    "endpoint": [
+        {
+            "conversationEnd": "2026-08-12T22:01:54.472Z",
+            "conversationId": "0c1d2e3f-1111-4aaa-8bbb-000000000001",
+            "conversationStart": "2026-08-12T22:01:45.985Z",
+            "divisionIds": [
+                "00000000-0000-4000-8000-000000000099"
+            ],
+            "originatingDirection": "outbound",
+            "participants": [
+                {
+                    "participantId": "00000000-0000-4000-8000-000000000011",
+                    "participantName": "Example customer",
+                    "purpose": "customer",
+                    "sessions": [
+                        {
+                            "ani": "tel:+570000000001",
+                            "direction": "outbound",
+                            "dnis": "tel:+570000000002",
+                            "mediaType": "voice",
+                            "sessionId": "00000000-0000-4000-8000-000000000021",
+                            "segments": [
+                                {
+                                    "segmentStart": "2026-08-12T22:01:46.028Z",
+                                    "segmentEnd": "2026-08-12T22:01:54.319Z",
+                                    "segmentType": "dialing"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "conversationEnd": "2026-08-12T22:05:10.100Z",
+            "conversationId": "0c1d2e3f-1111-4aaa-8bbb-000000000002",
+            "conversationStart": "2026-08-12T22:03:02.500Z",
+            "originatingDirection": "inbound",
+            "participants": [
+                {
+                    "participantId": "00000000-0000-4000-8000-000000000012",
+                    "purpose": "agent",
+                    "sessions": [
+                        {
+                            "direction": "inbound",
+                            "mediaType": "voice",
+                            "sessionId": "00000000-0000-4000-8000-000000000022",
+                            "segments": [
+                                {
+                                    "segmentStart": "2026-08-12T22:03:02.500Z",
+                                    "segmentEnd": "2026-08-12T22:05:10.100Z",
+                                    "segmentType": "interact"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

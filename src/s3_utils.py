@@ -23,6 +23,15 @@ def list_json_keys(s3_client, bucket: str, prefix: str) -> list[str]:
     return keys
 
 
+def list_common_prefixes(s3_client, bucket: str, prefix: str) -> list[str]:
+    """The "folders" directly under `prefix` (S3 CommonPrefixes), sorted."""
+    prefixes: list[str] = []
+    paginator = s3_client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix, Delimiter="/"):
+        prefixes.extend(entry["Prefix"] for entry in page.get("CommonPrefixes", []))
+    return sorted(prefixes)
+
+
 def read_json(s3_client, bucket: str, key: str) -> Any:
     body = s3_client.get_object(Bucket=bucket, Key=key)["Body"].read()
     # utf-8-sig: resource files edited on Windows sometimes carry a BOM.

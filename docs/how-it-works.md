@@ -5,9 +5,10 @@ pipeline. It doesn't call the Genesys data APIs itself. It works out **which
 calls** a flow needs, **for which ids**, **with which credentials**, and writes
 that plan (the payload) where the next Lambdas can execute it.
 
-For the surveys flow it can also run the **contracts process** first: turn the
+The ids can come from the event itself, from the **contracts process** (turn the
 providers' transcription files into parquet and take the conversation ids from
-them.
+them), or from the **Genesys conversations download** for a given date (read the
+conversation ids only).
 
 Contents:
 
@@ -51,6 +52,7 @@ What Request Unitary reads:
 | Secrets Manager, same prefix | each organization's OAuth `client_id` / `client_secret` |
 | DynamoDB via the runtime-control layer | cached OAuth tokens |
 | `augusta-nexa-<env>-providers-landing` | transcription files, when the run uses the contracts process |
+| `augusta-nexa-<env>-landing`, `conversations_details/` | the day's downloaded conversations, when the run uses that source (read-only) |
 | `CONTRACTS_PREFIX` in the resources bucket | the contracts, one per provider/operation |
 
 What it writes: one payload per run to
@@ -68,7 +70,7 @@ and deletes the transcription files it processed.
 | 2 | Execution id | The Lambda request id, or a UUID when there is no Lambda context. | `main.handler` |
 | 3 | Tag | `event.tag`, or `event.detail.tag` for EventBridge events. | `sources.resolve_tag` |
 | 4 | Stages | Load the `core.json` groups listed in `ENDPOINT_GROUPS`, keep the endpoints carrying this tag, and map each one's `type` to a stage. An unknown tag fails **here**, before any ids are read. | `endpoints.load_endpoint_catalog`, `endpoints.select_stages` |
-| 5 | Ids | With `"ids_source": "contracts"`: run the [contracts process](#contracts-process-where-surveys-ids-come-from) and group its conversation ids by organization. Otherwise from `event.organizations`, else the S3 file in `event.ids_location`, else the S3 object named in `event.detail`. Organizations merge, ids are de-duplicated and sorted, organizations without ids are dropped. | `main._resolve_ids`, `contracts_process.run_contracts`, `sources.resolve_ids_by_organization` |
+| 5 | Ids | With `"ids_source": "contracts"`: run the [contracts process](#contracts-process-where-surveys-ids-come-from) and group its conversation ids by organization. With `"ids_source": "conversations_details"`: read that `date`'s [conversation files](#conversations-download-ids-without-a-contract) per `org_id=` folder. Otherwise from `event.organizations`, else the S3 file in `event.ids_location`, else the S3 object named in `event.detail`. Organizations merge, ids are de-duplicated and sorted, organizations without ids are dropped. | `main._resolve_ids`, `contracts_process.run_contracts`, `conversations_details.collect_conversation_ids`, `sources.resolve_ids_by_organization` |
 | 6 | Genesys config | Once per run, and only if there are ids: `connection`, `servers`, `config` and the OAuth secrets. | `token_manager.load_config` |
 | 7 | Output prefix | Pick the prefix the downloaded JSON will be saved under, from the tag's domain. | `payload.output_base_path` |
 | 8 | Per organization | Find its `servers` entry → get its token → build one request template per stage. | `main._build_organizations`, `token_manager.get_token`, `payload.build_organization_entry` |
@@ -179,6 +181,26 @@ re-run while the other contracts continue. Contracts that share an
 organization (`pel` and `bpp` on `org-2`) contribute to one organization entry
 and one token.
 
+### Conversations download: ids without a contract
+
+`{"tag": "surveys", "ids_source": "conversations_details", "date": "2026-08-13"}`
+reads what the Genesys conversations download left in the landing bucket for
+that day. There is no contract, transform or parquet here: the ids only feed
+the payload, and the files are left untouched.
+
+```mermaid
+flowchart LR
+    L["landing/.../conversations_details/<br/>org_id=N/year=/month=/day="] --> F["each file:<br/>endpoint list, conversationId"]
+    F --> G["ids grouped by folder:<br/>org_id=N is org-N"]
+    G --> P["payload"]
+```
+
+| Step | Code |
+|---|---|
+| Validate `date` (`YYYY-MM-DD`) | `conversations_details.parse_date` |
+| List the `org_id=` folders | `s3_utils.list_common_prefixes` |
+| Read that day's files one at a time, keeping only the ids; skip unreadable ones | `conversations_details.collect_conversation_ids` |
+
 ### `funcionarios_adherencia`
 
 | | |
@@ -254,13 +276,15 @@ per-flow key would miss the cached token and request a second one.
 | No endpoints carry the tag; a tagged endpoint's `type` maps to no stage; two endpoints for the same stage | run fails, before ids are read |
 | `core.json` lacks a configured group; one endpoint defined differently in two files | run fails |
 | Event gives no ids source; an organization entry lacks `organization_id` or `ids` | run fails |
-| `ids_source` is anything other than `contracts` | run fails, before any file is touched |
+| `ids_source` is not `contracts` or `conversations_details` | run fails, before any file is touched |
+| `conversations_details` without a valid `date` | run fails, before any file is read |
 | `config.output` lacks the prefix key for the tag's domain | run fails |
 | No ids at all | empty payload written; Genesys and SSM are not called |
 | An organization has no `servers` entry | listed in `failed_organizations` with its ids; the others continue |
 | An organization's token can't be obtained | listed in `failed_organizations` with its ids; the others continue |
 | A contract fails (malformed contract, parquet write error, ...) | listed in `contracts.failed_contracts`; its source files stay; the other contracts continue |
 | A transcription file can't be read | skipped and left in place; the rest of that contract runs |
+| A conversations file can't be read or has no `endpoint` list | skipped and listed in `conversations_details.skipped_files`; the other files are read |
 
 Configuration problems fail the whole run, since every organization would hit
 them. Problems specific to one organization only affect that organization.
@@ -273,6 +297,7 @@ them. Problems specific to one organization only affect that organization.
 |---|---|
 | [src/main.py](../src/main.py) | `handler`: runs the steps above; `_resolve_ids`: event or contracts process; `_build_organizations`: the per-organization loop |
 | [src/contracts_process.py](../src/contracts_process.py) | the contracts process: per-contract loop, parquet writes, source deletion, ids by organization |
+| [src/conversations_details.py](../src/conversations_details.py) | ids from the Genesys conversations download: date partition, `org_id=` folders, `conversationId` |
 | [src/contract.py](../src/contract.py) | the contract model; contract discovery and loading |
 | [src/transform.py](../src/transform.py) | source record → business row: rename, cast, transformations, dedup |
 | [src/technical_columns.py](../src/technical_columns.py) | technical columns engine; `output_core` / `output_atts` rows |

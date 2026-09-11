@@ -115,3 +115,22 @@ def test_contracts_process_overrides(monkeypatch):
 
     assert settings.contracts_prefix == "contracts/other/"
     assert settings.contract_key == "contracts/other/x/sac/transcripcion.json"
+
+
+def test_conversations_details_defaults_follow_the_environment(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "stg")
+
+    settings = load_settings()
+
+    assert settings.conversations_details_bucket == "augusta-nexa-stg-landing"
+    assert settings.conversations_details_prefix == "transacciones/genesys/api/conversations_details/"
+
+
+def test_conversations_details_overrides(monkeypatch):
+    monkeypatch.setenv("CONVERSATIONS_DETAILS_BUCKET", "augusta-nexa-dev-landing-archive")
+    monkeypatch.setenv("CONVERSATIONS_DETAILS_PREFIX", "other/prefix/")
+
+    settings = load_settings()
+
+    assert settings.conversations_details_bucket == "augusta-nexa-dev-landing-archive"
+    assert settings.conversations_details_prefix == "other/prefix/"
