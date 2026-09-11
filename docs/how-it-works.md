@@ -55,7 +55,7 @@ What Request Unitary reads:
 | `augusta-nexa-<env>-landing`, `conversations_details/` | the day's downloaded conversations, when the run uses that source (read-only) |
 | `CONTRACTS_PREFIX` in the resources bucket | the contracts, one per provider/operation |
 
-What it writes: one payload per run to
+What it writes: one payload per tag per run to
 `augusta-nexa-<env>-logs/transacciones/genesys/api/payload_request_unitary/<tag>/<execution_id>.json`.
 With the contracts process it also writes parquet to `augusta-nexa-<env>-refined`
 and deletes the transcription files it processed.
@@ -68,14 +68,14 @@ and deletes the transcription files it processed.
 |---|---|---|---|
 | 1 | Settings | Environment token from `ENV_PREFIX` → `ENVIRONMENT` → `PROFILE` → `STACK_ID` (default `dev`); bucket names, SSM path and resource name derive from it. | `config.load_settings` |
 | 2 | Execution id | The Lambda request id, or a UUID when there is no Lambda context. | `main.handler` |
-| 3 | Tag | `event.tag`, or `event.detail.tag` for EventBridge events. | `sources.resolve_tag` |
-| 4 | Stages | Load the `core.json` groups listed in `ENDPOINT_GROUPS`, keep the endpoints carrying this tag, and map each one's `type` to a stage. An unknown tag fails **here**, before any ids are read. | `endpoints.load_endpoint_catalog`, `endpoints.select_stages` |
+| 3 | Tags | `tag` (one) or `tags` (a list, or `"all"`: every conversation flow), top-level or under `detail`. | `sources.resolve_tag_selection`, `endpoints.conversation_tags` |
+| 4 | Stages | Load the `core.json` groups listed in `ENDPOINT_GROUPS`, keep the endpoints carrying each tag, and map each one's `type` to a stage. Every tag is checked **here**, before any ids are read. | `endpoints.load_endpoint_catalog`, `endpoints.select_stages` |
 | 5 | Ids | With `"ids_source": "contracts"`: run the [contracts process](#contracts-process-where-surveys-ids-come-from) and group its conversation ids by organization. With `"ids_source": "conversations_details"`: read that `date`'s [conversation files](#conversations-download-ids-without-a-contract) per `org_id=` folder. Otherwise from `event.organizations`, else the S3 file in `event.ids_location`, else the S3 object named in `event.detail`. Organizations merge, ids are de-duplicated and sorted, organizations without ids are dropped. | `main._resolve_ids`, `contracts_process.run_contracts`, `conversations_details.collect_conversation_ids`, `sources.resolve_ids_by_organization` |
 | 6 | Genesys config | Once per run, and only if there are ids: `connection`, `servers`, `config` and the OAuth secrets. | `token_manager.load_config` |
 | 7 | Output prefix | Pick the prefix the downloaded JSON will be saved under, from the tag's domain. | `payload.output_base_path` |
-| 8 | Per organization | Find its `servers` entry → get its token → build one request template per stage. | `main._build_organizations`, `token_manager.get_token`, `payload.build_organization_entry` |
-| 9 | Write | Save `{"tag", "organization": [...]}` to the logs bucket. | `s3_utils.write_json` |
-| 10 | Return | The payload plus `execution_id`, `payload_location`, `stages`, `failed_organizations`. | `main.handler` |
+| 8 | Per organization | Find its `servers` entry → get its token (once, for every tag) → build its entry for each tag, one request template per stage. | `main._build_organizations`, `token_manager.get_token`, `payload.build_organization_entry` |
+| 9 | Write | Save one payload per tag, `{"tag", "organization": [...], "failed_organizations": [...]}`, to the logs bucket. | `main._write_payload` |
+| 10 | Return | `tags`; for each payload its `payload_location`, `stages` and ids per organization; failed organizations with an id count. Never the payloads themselves (Step Functions' 256 KB limit). | `main.handler` |
 
 ```mermaid
 sequenceDiagram
@@ -93,7 +93,7 @@ sequenceDiagram
     Note over RU: select the tag's stages<br/>(unknown tag: fail now)
     RU->>SRC: ids per organization
     alt no ids
-        RU->>LOGS: empty payload
+        RU->>LOGS: empty payload per tag
     else ids found
         RU->>SSM: connection, servers, config, secrets
         loop each organization
@@ -105,9 +105,9 @@ sequenceDiagram
             end
             Note over RU: one template per stage,<br/>with this organization's token and region
         end
-        RU->>LOGS: payload
+        RU->>LOGS: one payload per tag
     end
-    RU-->>SFN: payload + payload_location
+    RU-->>SFN: payload locations + counts
 ```
 
 ---
@@ -126,6 +126,11 @@ and stages always come out in this order:
 
 A flow needs at least one stage and at most one endpoint per stage. Endpoints
 without a `tag` belong to no flow.
+
+A run can execute several flows over the same ids (`"tags": ["surveys", "recordings"]`)
+or every conversation flow (`"tags": "all"`: every tag with an endpoint whose
+URL contains `{conversationId}`). The ids are read once and each organization's
+token is requested once; each tag gets its own payload file.
 
 **To add a flow:**
 
@@ -250,7 +255,7 @@ Everything specific to an **id** is left for the Lambdas that execute the calls.
 
 ## 6. Tokens
 
-One token per organization per run, however many stages or ids it has:
+One token per organization per run, however many tags, stages or ids it has:
 
 1. The organization id `org-3` becomes the `servers` key `org_3`, which gives
    `region_id`, `relative_path` and `oauth` (the secret name).
@@ -280,8 +285,10 @@ per-flow key would miss the cached token and request a second one.
 | `conversations_details` without a valid `date` | run fails, before any file is read |
 | `config.output` lacks the prefix key for the tag's domain | run fails |
 | No ids at all | empty payload written; Genesys and SSM are not called |
-| An organization has no `servers` entry | listed in `failed_organizations` with its ids; the others continue |
-| An organization's token can't be obtained | listed in `failed_organizations` with its ids; the others continue |
+| Both `tag` and `tags`; `tags` not `"all"` or a list of names | run fails |
+| `"tags": "all"` finds no conversation flow | run fails |
+| An organization has no `servers` entry | left out of every payload; listed with its ids in each payload file and with an id count in the response; the others continue |
+| An organization's token can't be obtained | left out of every payload; listed with its ids in each payload file and with an id count in the response; the others continue |
 | A contract fails (malformed contract, parquet write error, ...) | listed in `contracts.failed_contracts`; its source files stay; the other contracts continue |
 | A transcription file can't be read | skipped and left in place; the rest of that contract runs |
 | A conversations file can't be read or has no `endpoint` list | skipped and listed in `conversations_details.skipped_files`; the other files are read |

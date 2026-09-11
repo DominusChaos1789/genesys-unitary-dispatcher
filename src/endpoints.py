@@ -21,6 +21,7 @@ from src.config import Settings
 
 STAGE_BY_TYPE = {"unitary": "request_context", "init": "request_init", "status": "request_status"}
 STAGE_ORDER = ("request_context", "request_init", "request_status")
+CONVERSATION_ID_PLACEHOLDER = "{conversationId}"
 
 
 def _references(value: Any) -> list[str]:
@@ -51,6 +52,19 @@ def load_endpoint_catalog(s3_client, settings: Settings) -> dict[str, dict]:
             definitions = s3_utils.read_json(s3_client, settings.resources_bucket, reference)
             _merge(catalog, definitions, reference)
     return catalog
+
+
+def conversation_tags(catalog: dict[str, dict]) -> list[str]:
+    """Tags of every flow that takes conversation ids -- those with an endpoint
+    whose url has {conversationId}. This is what `"tags": "all"` expands to, so
+    flows keyed by other ids (e.g. adherence's {mu_id}) are never included."""
+    return sorted(
+        {
+            spec["tag"]
+            for spec in catalog.values()
+            if spec.get("tag") and CONVERSATION_ID_PLACEHOLDER in spec.get("url", "")
+        }
+    )
 
 
 def select_stages(catalog: dict[str, dict], tag: str) -> dict[str, tuple[str, dict]]:

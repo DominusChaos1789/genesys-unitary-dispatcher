@@ -202,3 +202,25 @@ def genesys_api(monkeypatch):
     monkeypatch.setattr("src.main.load_config", fake_load_config)
     monkeypatch.setattr("src.main.get_token", fake_get_token)
     return calls
+
+
+# --- Reading back what a run wrote ------------------------------------------
+# The response only carries each payload's location and counts; the payload
+# itself lives in S3.
+
+
+def read_payload(result: dict, tag: str | None = None) -> dict:
+    """The payload a run wrote for `tag` -- or for its only tag, when omitted."""
+    payloads = result["payloads"]
+    if tag is None:
+        assert len(payloads) == 1, f"expected one payload, got tags {[p['tag'] for p in payloads]}"
+        item = payloads[0]
+    else:
+        item = next(p for p in payloads if p["tag"] == tag)
+    bucket, key = item["payload_location"].removeprefix("s3://").split("/", 1)
+    body = boto3.client("s3", region_name="us-east-1").get_object(Bucket=bucket, Key=key)["Body"].read()
+    return json.loads(body)
+
+
+def payload_by_org(result: dict, tag: str | None = None) -> dict:
+    return {entry["organization_id"]: entry for entry in read_payload(result, tag)["organization"]}

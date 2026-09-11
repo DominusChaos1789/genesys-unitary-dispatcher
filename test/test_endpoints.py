@@ -3,7 +3,7 @@ import json
 import pytest
 
 from src.config import load_settings
-from src.endpoints import load_endpoint_catalog, select_stages
+from src.endpoints import conversation_tags, load_endpoint_catalog, select_stages
 from test.conftest import CORE_CONFIG_KEY, ENDPOINTS_PREFIX, RESOURCES_BUCKET, load_fixture
 
 
@@ -147,3 +147,16 @@ def test_a_tagged_endpoint_whose_type_maps_to_no_stage_is_an_error():
 
     with pytest.raises(ValueError, match="'result', which maps to no stage"):
         select_stages(catalog, "surveys")
+
+
+def test_conversation_tags_are_the_flows_taking_conversation_ids():
+    catalog = _catalog()
+    catalog["conversation_recordings"] = {
+        "tag": "recordings",
+        "type": "unitary",
+        "url": "/api/v2/conversations/{conversationId}/recordings",
+    }
+    catalog["untagged_conversation_call"] = {"type": "unitary", "url": "/api/v2/x/{conversationId}"}
+
+    # funcionarios_adherencia uses {mu_id}/{jobId}; untagged endpoints belong to no flow.
+    assert conversation_tags(catalog) == ["recordings", "surveys"]

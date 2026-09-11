@@ -70,6 +70,21 @@ sorted, and organizations with no ids are dropped. An entry missing
 `organization_id` or `ids` is an error, so a typo like `"id"` can't silently
 drop an organization.
 
+### Several flows in one run
+
+```json
+{"tags": ["surveys", "recordings"], "ids_source": "conversations_details", "date": "2026-08-13"}
+{"tags": "all", "ids_source": "conversations_details", "date": "2026-08-13"}
+```
+
+`tags` runs several flows over the same ids: the ids are read once, each
+organization's token is requested once, and each tag gets its own payload file.
+`"all"` means every conversation flow, i.e. every tag with an endpoint whose URL
+contains `{conversationId}`. Flows keyed by other ids, like adherence
+(`{mu_id}`), are never included, and a new conversation flow joins `"all"` as
+soon as its endpoint is tagged. Every tag is validated before any ids are read.
+Send either `tag` or `tags`, not both.
+
 ### Ids from the contracts process
 
 ```json
@@ -122,7 +137,8 @@ An unknown `ids_source` value fails the run before any file is touched.
       },
       "request_status": {"...": "...", "url": ".../bulk/jobs/{jobId}", "result_data": "status"}
     }
-  ]
+  ],
+  "failed_organizations": []
 }
 ```
 
@@ -148,8 +164,30 @@ An unknown `ids_source` value fails the run before any file is touched.
   A flow in a new domain needs an entry in `OUTPUT_BASE_PATH_KEY_BY_DOMAIN`
   ([src/payload.py](src/payload.py)); a missing config key fails the run.
 
-The handler returns the payload plus `execution_id`, `payload_location`,
-`stages` and `failed_organizations`.
+### Response
+
+The response says where each payload is and how many ids it holds, never the
+payload itself: a day of conversations can exceed the Step Functions 256 KB
+state limit.
+
+```json
+{
+  "execution_id": "...",
+  "tags": ["surveys"],
+  "payloads": [
+    {
+      "tag": "surveys",
+      "payload_location": "s3://augusta-nexa-dev-logs/transacciones/genesys/api/payload_request_unitary/surveys/<execution_id>.json",
+      "stages": ["request_context"],
+      "organizations": {"org-1": 5100, "org-3": 820}
+    }
+  ],
+  "failed_organizations": [{"organization_id": "org-9", "id_count": 12, "error": "no servers entry for org_9"}]
+}
+```
+
+With an ids source, the response also carries that source's summary under its
+name (`contracts`, `conversations_details`), with counts rather than ids.
 
 ### Where it's written
 
@@ -157,17 +195,22 @@ The handler returns the payload plus `execution_id`, `payload_location`,
 
 The key includes the tag and the Lambda request id because Status and Download
 read the payload back: with one fixed key, a surveys run could overwrite an
-adherence payload that's still being processed. Pass `payload_location` to the
-next states instead of rebuilding the key.
+adherence payload that's still being processed. Pass each
+`payloads[].payload_location` to the next states (for example a Map state over
+`$.payloads`) instead of rebuilding the key.
 
 ### Failures
 
 - Unknown tag, or a misconfigured catalog → the invocation fails, **before**
   any ids are read.
 - An organization with no `servers` entry, or whose token can't be obtained →
-  listed in `failed_organizations` **with its ids**; the other organizations
-  still get entries. With the contracts process the source files are already
-  deleted at that point, so this is where those ids survive.
+  left out of every payload. Each payload file lists it under
+  `failed_organizations` **with its ids**, and the response gives its
+  `id_count`; the other organizations still get entries. With the contracts
+  process the source files are already deleted at that point, so the payload
+  file is where those ids survive.
+- Both `tag` and `tags`, `tags` that isn't `"all"` or a list of names, or
+  `"all"` with no conversation flow in the catalog → the invocation fails.
 - No ids at all → an empty payload is still written, and Genesys isn't called.
 
 ## Contracts process

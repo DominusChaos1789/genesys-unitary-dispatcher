@@ -78,5 +78,11 @@ def build_organization_entry(
     return entry
 
 
-def build_payload(tag: str, organizations: list[dict[str, Any]]) -> dict[str, Any]:
-    return {"tag": tag, "organization": organizations}
+def build_payload(
+    tag: str,
+    organizations: list[dict[str, Any]],
+    failed_organizations: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """The file Unitary Status and Unitary Download read. Organizations that
+    couldn't be served are listed with their ids, so a re-run has them."""
+    return {"tag": tag, "organization": organizations, "failed_organizations": failed_organizations or []}

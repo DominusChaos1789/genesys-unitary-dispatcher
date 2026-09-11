@@ -135,6 +135,14 @@ def _ids_by_organization(results: list[dict]) -> dict[str, list[str]]:
     return {organization_id: sorted(ids) for organization_id, ids in grouped.items()}
 
 
+def _result_summary(result: dict) -> dict:
+    """A contract's result for the Lambda response: its conversation ids are
+    replaced by their count, since the response has to stay small."""
+    summary = {key: value for key, value in result.items() if key != "conversation_ids"}
+    summary["conversation_count"] = len(result["conversation_ids"])
+    return summary
+
+
 def run_contracts(s3_client, settings: Settings, execution_id: str) -> dict:
     """Processes every contract. Returns the conversation ids grouped by
     organization, and a summary for the Lambda's response."""
@@ -156,6 +164,6 @@ def run_contracts(s3_client, settings: Settings, execution_id: str) -> dict:
             "contracts_processed": len(results),
             "failed_contracts": failed,
             "processed_files": sum(result["processed_files"] for result in results),
-            "results": results,
+            "results": [_result_summary(result) for result in results],
         },
     }

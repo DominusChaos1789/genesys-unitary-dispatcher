@@ -7,7 +7,7 @@ import src.s3_utils as s3_utils
 from src.conversations_details import organization_id_from_folder, parse_date
 from src.main import handler
 from src.sources import EventError
-from test.conftest import LANDING_BUCKET, load_fixture
+from test.conftest import LANDING_BUCKET, load_fixture, payload_by_org, read_payload
 
 PREFIX = "transacciones/genesys/api/conversations_details/"
 DAY = "2026-08-13"
@@ -23,7 +23,7 @@ def _context(request_id: str = "req-details"):
 
 
 def _by_org(result: dict) -> dict:
-    return {entry["organization_id"]: entry for entry in result["organization"]}
+    return payload_by_org(result)
 
 
 def _put(s3, key: str, body) -> None:
@@ -111,7 +111,7 @@ def test_folders_that_are_not_org_partitions_are_ignored(aws):
 def test_a_day_without_files_produces_an_empty_payload_without_touching_genesys(aws, genesys_api):
     result = handler(EVENT, _context())
 
-    assert result["organization"] == []
+    assert read_payload(result)["organization"] == []
     assert result["conversations_details"]["files_read"] == 0
     assert genesys_api["load_config"] == []
 

@@ -1,33 +1,54 @@
-"""Which tag a run executes, and where its ids come from.
+"""Which tags a run executes, and where its ids come from.
 
-The event names the tag and supplies the ids grouped by Genesys
+The event names the tag(s) and supplies the ids grouped by Genesys
 organization, either inline or as a pointer to a JSON file in S3:
 
     {"tag": "surveys",
      "organizations": [{"organization_id": "org-3", "ids": ["..."]}]}
 
-    {"tag": "funcionarios_adherencia",
+    {"tags": ["surveys", "recordings"],
      "ids_location": {"bucket": "landing", "key": "..."}}
 
+`"tags": "all"` means every conversation flow (see endpoints.conversation_tags).
 An S3 "Object Created" event delivered through EventBridge also works: the
-bucket and key come from `detail`, and the tag from `tag` or `detail.tag`
-(set by the rule's input transformer). The file holds the same
+bucket and key come from `detail`, and the tag(s) from the top level or from
+`detail` (set by the rule's input transformer). The file holds the same
 organizations list, bare or as {"organizations": [...]}.
 """
 
 import src.s3_utils as s3_utils
 from src.config import Settings
 
+ALL_TAGS = "all"
+
 
 class EventError(ValueError):
     """The event doesn't say what to run or which ids to run it for."""
 
 
-def resolve_tag(event: dict) -> str:
-    tag = event.get("tag") or (event.get("detail") or {}).get("tag")
-    if not tag:
-        raise EventError("Event has no 'tag' (top-level or under 'detail')")
-    return tag
+def _tags_list(tags) -> list[str] | str:
+    if tags == ALL_TAGS:
+        return ALL_TAGS
+    if not isinstance(tags, list) or not tags or not all(isinstance(tag, str) and tag for tag in tags):
+        raise EventError(f"'tags' must be \"all\" or a non-empty list of tag names, got {tags!r}")
+    return list(dict.fromkeys(tags))
+
+
+def resolve_tag_selection(event: dict) -> list[str] | str:
+    """The tags to run, in order and without repeats -- or ALL_TAGS.
+
+    Accepts `tag` (one) or `tags` (a list, or "all"), top-level or under
+    `detail`, but not both keys at once.
+    """
+    source = event if ("tag" in event or "tags" in event) else (event.get("detail") or {})
+    if "tag" in source and "tags" in source:
+        raise EventError("Event has both 'tag' and 'tags'; send one of them")
+    if "tags" in source:
+        return _tags_list(source["tags"])
+    tag = source.get("tag")
+    if not isinstance(tag, str) or not tag:
+        raise EventError("Event has no 'tag' or 'tags' (top-level or under 'detail')")
+    return [tag]
 
 
 def _ids_location(event: dict) -> tuple[str, str] | None:

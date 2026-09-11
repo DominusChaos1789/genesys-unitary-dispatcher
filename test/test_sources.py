@@ -3,22 +3,44 @@ import json
 import pytest
 
 from src.config import load_settings
-from src.sources import EventError, resolve_ids_by_organization, resolve_tag
+from src.sources import ALL_TAGS, EventError, resolve_ids_by_organization, resolve_tag_selection
 from test.conftest import LANDING_BUCKET
 
 
-def test_tag_is_read_from_the_top_level():
-    assert resolve_tag({"tag": "surveys"}) == "surveys"
+def test_a_single_tag_top_level():
+    assert resolve_tag_selection({"tag": "surveys"}) == ["surveys"]
 
 
-def test_tag_is_read_from_the_eventbridge_detail():
-    assert resolve_tag({"detail": {"tag": "funcionarios_adherencia"}}) == "funcionarios_adherencia"
+def test_a_single_tag_from_the_eventbridge_detail():
+    assert resolve_tag_selection({"detail": {"tag": "funcionarios_adherencia"}}) == [
+        "funcionarios_adherencia"
+    ]
 
 
-@pytest.mark.parametrize("event", [{}, {"tag": ""}, {"detail": {}}, {"detail": None}])
+def test_a_list_of_tags_keeps_its_order_and_drops_repeats():
+    assert resolve_tag_selection({"tags": ["surveys", "recordings", "surveys"]}) == ["surveys", "recordings"]
+
+
+@pytest.mark.parametrize("event", [{"tags": "all"}, {"detail": {"tags": "all"}}])
+def test_all_tags_is_left_for_expansion_against_the_catalog(event):
+    assert resolve_tag_selection(event) == ALL_TAGS
+
+
+@pytest.mark.parametrize("event", [{}, {"tag": ""}, {"tag": 3}, {"detail": {}}, {"detail": None}])
 def test_missing_tag_is_an_error(event):
-    with pytest.raises(EventError, match="no 'tag'"):
-        resolve_tag(event)
+    with pytest.raises(EventError, match="no 'tag' or 'tags'"):
+        resolve_tag_selection(event)
+
+
+@pytest.mark.parametrize("tags", [[], "surveys", ["surveys", ""], [1], None])
+def test_tags_must_be_all_or_a_list_of_names(tags):
+    with pytest.raises(EventError, match="'tags' must be"):
+        resolve_tag_selection({"tags": tags})
+
+
+def test_tag_and_tags_together_is_an_error():
+    with pytest.raises(EventError, match="both 'tag' and 'tags'"):
+        resolve_tag_selection({"tag": "surveys", "tags": ["recordings"]})
 
 
 def test_inline_organizations_are_merged_deduplicated_and_sorted():

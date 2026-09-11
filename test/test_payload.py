@@ -85,7 +85,14 @@ def test_payload_shape():
     assert build_payload("surveys", [{"organization_id": "org-1"}]) == {
         "tag": "surveys",
         "organization": [{"organization_id": "org-1"}],
+        "failed_organizations": [],
     }
+
+
+def test_payload_lists_failed_organizations_with_their_ids():
+    failed = [{"organization_id": "org-9", "ids": ["x"], "error": "boom"}]
+
+    assert build_payload("surveys", [], failed)["failed_organizations"] == failed
 
 
 @pytest.mark.parametrize(

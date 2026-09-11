@@ -21,6 +21,8 @@ from test.conftest import (
     RESOURCES_BUCKET,
     SOURCE_PREFIX,
     load_fixture,
+    payload_by_org,
+    read_payload,
 )
 
 EVENT = {"tag": "surveys", "ids_source": "contracts"}
@@ -32,7 +34,7 @@ def _context(request_id: str = "req-contracts"):
 
 
 def _by_org(result: dict) -> dict:
-    return {entry["organization_id"]: entry for entry in result["organization"]}
+    return payload_by_org(result)
 
 
 def _date_path() -> str:
@@ -68,6 +70,9 @@ def test_contracts_run_writes_parquet_deletes_sources_and_builds_the_surveys_pay
     assert bdo["contract_key"] == CONTRACT_KEY
     assert bdo["organization_id"] == "org-3"
     assert bdo["deleted_source_files"] == 2
+    # The response carries a count, not the ids themselves.
+    assert bdo["conversation_count"] == 2
+    assert "conversation_ids" not in bdo
     assert _landing_keys(s3) == []
 
     # output_core: one row per conversation, partitioned by client/operation, then processing date.
@@ -170,7 +175,7 @@ def test_source_files_are_kept_when_a_contract_fails_before_deletion(aws, seeded
         {"contract_key": CONTRACT_KEY, "error": "refined bucket unavailable"}
     ]
     assert _landing_keys(aws["s3"]) == sorted(seeded_source_files)
-    assert result["organization"] == []
+    assert read_payload(result)["organization"] == []
 
 
 def test_unreadable_source_files_are_skipped_and_left_in_place(aws, seeded_source_files):
@@ -192,7 +197,7 @@ def test_contracts_without_source_files_produce_an_empty_payload(aws, genesys_ap
 
     assert result["contracts"]["contracts_processed"] == 1
     assert result["contracts"]["results"][0]["processed_files"] == 0
-    assert result["organization"] == []
+    assert read_payload(result)["organization"] == []
     assert genesys_api["load_config"] == []
 
 
@@ -207,6 +212,9 @@ def test_a_token_failure_reports_the_ids_that_can_no_longer_be_reread(aws, seede
     # The source files are already deleted, so the ids must survive in the response.
     assert _landing_keys(aws["s3"]) == []
     assert result["failed_organizations"] == [
+        {"organization_id": "org-3", "id_count": 2, "error": "oauth down"}
+    ]
+    assert read_payload(result)["failed_organizations"] == [
         {"organization_id": "org-3", "ids": sorted(BDO_IDS), "error": "oauth down"}
     ]
 
