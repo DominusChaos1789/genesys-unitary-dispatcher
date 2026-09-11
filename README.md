@@ -194,8 +194,19 @@ copies of the real `unitary.json`, `status.json` and `jobs.json`.
   and send the init `POST` before Status can poll a jobId. This Lambda only
   builds the templates.
 - **Adherence job granularity.** The init body carries one `{user_id}`, i.e. a
-  job per advisor. With `rate_limit_per_minute: 30`, a 200-advisor unit is
-  ~7 minutes of POSTs before polling; the bulk body accepts several `userIds`.
+  job per advisor. Per the Genesys SDK model `WfmHistoricalAdherenceBulkItem`,
+  `userIds` is optional and *"if not included, will query every user in the
+  management unit"*. One init per management unit, without the
+  `users_managment_unit` listing, would cover everyone, instead of ~200 POSTs
+  for a 200-advisor unit at `rate_limit_per_minute: 30`. The body's shape does
+  match the model: `items` (required; each with required `managementUnitId`,
+  `startDate`, `endDate` in ISO-8601, and optional `userIds`,
+  `includeExceptions`, `includeActuals`) plus a required olson `timeZone`.
+  Results come back as UTC timestamps regardless of `timeZone`.
+- **Status polling identity.** Genesys documents the bulk job status endpoint
+  as *"only the user who started the operation can query the status"*, so
+  Unitary Status must poll with the same organization's OAuth client that
+  sent the init. The per-organization tokens in the payload do that.
 - **Tokens at rest.** The payload embeds bearer tokens, so they're stored in the
   logs bucket and in Step Functions execution history for ~24h.
 - **OAuth credentials in the query string.** The token exchange sends
