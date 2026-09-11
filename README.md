@@ -5,6 +5,9 @@ invocation runs one **tag** (one workflow), builds a payload with an entry per
 Genesys organization, writes it to the logs bucket and returns it for the Step
 Function.
 
+**How it works** — step-by-step logic, diagrams, token handling and failure
+behavior: [docs/how-it-works.md](docs/how-it-works.md).
+
 This repo contains only Request Unitary. **Unitary Status** (polls a jobId
 until the job completes) and **Unitary Download** (fetches the result into
 `landing`) read the payload this Lambda writes, and live elsewhere. The hourly
