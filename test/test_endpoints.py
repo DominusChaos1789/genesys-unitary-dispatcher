@@ -103,15 +103,21 @@ def test_surveys_is_a_single_direct_stage():
     assert stages["request_context"][0] == "conversations_surveys"
 
 
-def test_adherence_has_context_init_and_status_in_flow_order():
+def test_adherence_is_init_then_status_without_a_users_listing():
     stages = select_stages(_catalog(), "funcionarios_adherencia")
 
-    assert list(stages) == ["request_context", "request_init", "request_status"]
-    assert [name for name, _ in stages.values()] == [
-        "users_managment_unit",
-        "adherence_historical_init",
-        "adherence_agent_status",
-    ]
+    assert list(stages) == ["request_init", "request_status"]
+    assert [name for name, _ in stages.values()] == ["adherence_historical_init", "adherence_agent_status"]
+
+
+def test_stages_come_out_in_flow_order_whatever_the_catalog_order():
+    catalog = {
+        "demo_status": {"tag": "demo", "type": "status", "url": "/s"},
+        "demo_init": {"tag": "demo", "type": "init", "url": "/i"},
+        "demo_context": {"tag": "demo", "type": "unitary", "url": "/c"},
+    }
+
+    assert list(select_stages(catalog, "demo")) == ["request_context", "request_init", "request_status"]
 
 
 def test_untagged_endpoints_belong_to_no_flow():

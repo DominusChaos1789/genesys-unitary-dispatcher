@@ -7,7 +7,7 @@ Each entry carries that organization's bearer token, regional base_url and a
 request template for every stage of the flow (payload.py):
 
     surveys                  -> request_context
-    funcionarios_adherencia  -> request_context, request_init, request_status
+    funcionarios_adherencia  -> request_init, request_status (one job per management unit)
 
 The payload is written to the logs bucket under a key holding the tag and
 this invocation's execution id -- Unitary Status and Unitary Download read

@@ -34,7 +34,7 @@ Current tags:
 | tag | stages | endpoints |
 |---|---|---|
 | `surveys` | `request_context` | `conversations_surveys` (GET, one call per conversation id, no polling) |
-| `funcionarios_adherencia` | `request_context` → `request_init` → `request_status` | `users_managment_unit`, `adherence_historical_init` (POST), `adherence_agent_status` |
+| `funcionarios_adherencia` | `request_init` → `request_status` | `adherence_historical_init` (POST, one bulk job per management unit; no `userIds`, so it covers every user in the unit), `adherence_agent_status` |
 
 Adding a flow (e.g. the generic conversations extraction) means tagging its
 endpoints — no code change, as long as it has at most one endpoint per stage.
@@ -74,16 +74,20 @@ drop an organization.
   "organization": [
     {
       "organization_id": "org-1",
-      "ids": ["..."],
-      "request_context": {
+      "ids": ["<management unit id>", "..."],
+      "request_init": {
         "base_url": "https://api.sae1.pure.cloud",
-        "url": "/api/v2/workforcemanagement/managementunits/{mu_id}/users",
-        "method": "GET",
+        "url": "/api/v2/workforcemanagement/adherence/historical/bulk",
+        "method": "POST",
         "headers": {"Authorization": "Bearer <org-1 token>", "Content-Type": "application/json"},
-        "type": "unitary", "path": "users_managment_unit", "result_data": "state",
+        "payload": {
+          "items": [{"managementUnitId": "{mu_id}", "startDate": "{star_date}", "endDate": "{end_date}",
+                     "includeExceptions": true, "includeActuals": true}],
+          "timeZone": "America/Bogota"
+        },
+        "type": "init", "path": "adherence_details", "result_data": "jobId",
         "base_path": "funcionarios/genesys/api", "server_path": "org_id=1/"
       },
-      "request_init": {"...": "...", "method": "POST", "payload": {"items": ["..."]}, "result_data": "jobId"},
       "request_status": {"...": "...", "url": ".../bulk/jobs/{jobId}", "result_data": "status"}
     }
   ]
@@ -92,7 +96,7 @@ drop an organization.
 
 - Only the organization-specific parts are rendered: `base_url` (region) and
   the `Authorization` header (token). Per-id placeholders — `{conversationId}`,
-  `{mu_id}`, `{user_id}`, `{jobId}`, `{star_date}`, `{end_date}` — are left for
+  `{mu_id}`, `{jobId}`, `{star_date}`, `{end_date}` — are left for
   Status/Download to fill per call.
 - Every stage of an organization uses **that organization's** token and region.
 - `method`, `type`, `path`, `result_data` and the body come from the endpoint
@@ -190,19 +194,18 @@ copies of the real `unitary.json`, `status.json` and `jobs.json`.
 
 ## Open items
 
-- **Adherence execution owner.** Someone has to *call* `users_managment_unit`
-  and send the init `POST` before Status can poll a jobId. This Lambda only
-  builds the templates.
-- **Adherence job granularity.** The init body carries one `{user_id}`, i.e. a
-  job per advisor. Per the Genesys SDK model `WfmHistoricalAdherenceBulkItem`,
-  `userIds` is optional and *"if not included, will query every user in the
-  management unit"*. One init per management unit, without the
-  `users_managment_unit` listing, would cover everyone, instead of ~200 POSTs
-  for a 200-advisor unit at `rate_limit_per_minute: 30`. The body's shape does
-  match the model: `items` (required; each with required `managementUnitId`,
-  `startDate`, `endDate` in ISO-8601, and optional `userIds`,
-  `includeExceptions`, `includeActuals`) plus a required olson `timeZone`.
-  Results come back as UTC timestamps regardless of `timeZone`.
+- **Who sends the adherence init.** Something has to send the init `POST`,
+  filling `{mu_id}`, `{star_date}` and `{end_date}`, before Status can poll the
+  `jobId`. This Lambda only builds the templates.
+- **Bulk job limits.** Adherence runs one bulk job per management unit.
+  `userIds` is left out, which per the Genesys SDK model
+  `WfmHistoricalAdherenceBulkItem` queries every user in the unit. Not yet
+  confirmed: the maximum `items` per job, the maximum date range per item, and
+  how many jobs can run at once per organization. Check them before long
+  backfills or grouping several units into one job. The body matches the
+  model: required `items` (each with required `managementUnitId`, `startDate`,
+  `endDate` in ISO-8601, and optional `includeExceptions`, `includeActuals`)
+  and a required olson `timeZone`. Results come back as UTC timestamps.
 - **Status polling identity.** Genesys documents the bulk job status endpoint
   as *"only the user who started the operation can query the status"*, so
   Unitary Status must poll with the same organization's OAuth client that

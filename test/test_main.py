@@ -58,7 +58,7 @@ def test_surveys_payload_has_one_direct_stage_per_organization(aws, genesys_api)
     assert genesys_api["resource_name"] == "augusta-nexa-dev-genesys-api-unitary-request"
 
 
-def test_adherence_payload_has_context_init_and_status_stages(aws):
+def test_adherence_is_one_job_per_management_unit(aws):
     s3 = aws["s3"]
     key = "funcionarios/genesys/management_units/2026-09-11.json"
     s3.put_object(
@@ -72,11 +72,11 @@ def test_adherence_payload_has_context_init_and_status_stages(aws):
         _context(),
     )
 
-    assert result["stages"] == ["request_context", "request_init", "request_status"]
+    # No users listing stage: the job itself covers every user in the management unit.
+    assert result["stages"] == ["request_init", "request_status"]
     entry = _by_org(result)["org-1"]
     assert entry["ids"] == ["mu-1", "mu-2"]
-    assert entry["request_context"]["url"] == "/api/v2/workforcemanagement/managementunits/{mu_id}/users"
-    assert entry["request_context"]["path"] == "users_managment_unit"
+    assert "request_context" not in entry
 
     init = entry["request_init"]
     assert init["url"] == "/api/v2/workforcemanagement/adherence/historical/bulk"
@@ -85,6 +85,9 @@ def test_adherence_payload_has_context_init_and_status_stages(aws):
     assert init["type"] == "init"
     assert init["result_data"] == "jobId"
     assert init["payload"] == load_fixture("unitary.json")["adherence_historical_init"]["body_templante"]
+    # userIds omitted: Genesys queries every user in the management unit.
+    assert init["payload"]["items"][0]["managementUnitId"] == "{mu_id}"
+    assert "userIds" not in init["payload"]["items"][0]
 
     status = entry["request_status"]
     assert status["url"] == "/api/v2/workforcemanagement/adherence/historical/bulk/jobs/{jobId}"

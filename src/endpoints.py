@@ -9,9 +9,9 @@ stages, keyed by their `type`:
     init    -> request_init      starts an async job and returns a jobId
     status  -> request_status    polled until the job completes
 
-So "surveys" is a single request_context, while "funcionarios_adherencia"
-is request_context + request_init + request_status. A new flow is added by
-tagging its endpoints -- no code change.
+So "surveys" is a single request_context, while "funcionarios_adherencia" is
+request_init + request_status: one bulk job per management unit, which covers
+every user in it. A new flow is added by tagging its endpoints -- no code change.
 """
 
 from typing import Any

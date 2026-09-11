@@ -9,7 +9,6 @@
     },
     "users_managment_unit": {
         "url": "/api/v2/workforcemanagement/managementunits/{mu_id}/users",
-        "tag": "funcionarios_adherencia",
         "type": "unitary",
         "method": "GET",
         "path": "users_managment_unit",
@@ -27,9 +26,6 @@
                     "managementUnitId": "{mu_id}",
                     "startDate": "{star_date}",
                     "endDate": "{end_date}",
-                    "userIds": [
-                        "{user_id}"
-                    ],
                     "includeExceptions": true,
                     "includeActuals": true
                 }

@@ -5,8 +5,6 @@ Retrieves the Genesys API configuration stored under a hierarchical path
 (e.g. /augusta-nexa-dev/genesys/api), handling pagination, SecureString
 decryption and JSON parsing, plus the matching Secrets Manager entries that
 hold the per-organization OAuth credentials.
-
-Author(s): Felipe Segundo Abril Bermúdez
 """
 
 import json
