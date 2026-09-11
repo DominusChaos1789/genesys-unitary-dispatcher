@@ -25,7 +25,7 @@ import boto3
 import src.s3_utils as s3_utils
 from src.config import Settings, load_settings
 from src.endpoints import load_endpoint_catalog, select_stages
-from src.payload import build_organization_entry, build_payload
+from src.payload import build_organization_entry, build_payload, output_base_path
 from src.sources import resolve_ids_by_organization, resolve_tag
 from src.token_manager import get_token, load_config
 
@@ -39,14 +39,23 @@ def _server_key(organization_id: str) -> str:
 
 
 def _build_organizations(
-    settings: Settings, ids_by_organization: dict[str, list[str]], stages: dict[str, tuple[str, dict]]
+    settings: Settings,
+    ids_by_organization: dict[str, list[str]],
+    stages: dict[str, tuple[str, dict]],
+    tag: str,
 ) -> tuple[list[dict], list[dict]]:
     """(organization entries, failed organizations). One token per organization."""
     if not ids_by_organization:
         return [], []
 
     config = load_config(settings.api_genesys_params, region_name=settings.region)
-    base_path = config["config"]["output"]["base_path"]
+    output = config["config"]["output"]
+    # Prefix this flow's downloads are saved under: transacciones vs funcionarios.
+    base_path = output_base_path(output, tag)
+    # Cached tokens live under base_path whatever the flow (as in the original
+    # token flow). Tokens are per organization, so keying the cache on
+    # base_path_wfm would miss the cached token and mint a second one.
+    token_base_path = output["base_path"]
     connection = config["connection"]
 
     organizations: list[dict] = []
@@ -66,7 +75,7 @@ def _build_organizations(
 
         try:
             token = get_token(
-                config["secret"], connection, base_path, server, resource_name=settings.resource_name
+                config["secret"], connection, token_base_path, server, resource_name=settings.resource_name
             )
             organizations.append(
                 build_organization_entry(
@@ -98,7 +107,7 @@ def handler(event, context):
     ids_by_organization = resolve_ids_by_organization(s3_client, settings, event)
     logger.info("Tag %s: stages %s, %d organization(s)", tag, list(stages), len(ids_by_organization))
 
-    organizations, failed = _build_organizations(settings, ids_by_organization, stages)
+    organizations, failed = _build_organizations(settings, ids_by_organization, stages, tag)
     payload = build_payload(tag, organizations)
 
     key = settings.payload_log_key(tag, execution_id)

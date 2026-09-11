@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.main import handler
-from test.conftest import GENESYS_BASE_PATH, LANDING_BUCKET, LOGS_BUCKET, load_fixture
+from test.conftest import GENESYS_BASE_PATH, GENESYS_BASE_PATH_WFM, LANDING_BUCKET, LOGS_BUCKET, load_fixture
 
 PAYLOAD_PREFIX = "transacciones/genesys/api/payload_request_unitary"
 
@@ -236,3 +236,27 @@ def test_unknown_tag_fails_before_reading_any_ids(aws):
 
     with pytest.raises(ValueError, match="No endpoints are tagged 'nope'"):
         handler(event, _context())
+
+
+def test_funcionarios_flows_are_saved_under_base_path_wfm(aws):
+    event = {
+        "tag": "funcionarios_adherencia",
+        "organizations": [{"organization_id": "org-1", "ids": ["mu-1"]}],
+    }
+
+    result = handler(event, _context())
+
+    entry = _by_org(result)["org-1"]
+    for stage_key in result["stages"]:
+        assert entry[stage_key]["base_path"] == GENESYS_BASE_PATH_WFM
+
+
+def test_the_token_cache_key_stays_on_base_path_for_every_flow(aws, genesys_api):
+    """Tokens are per organization: keying the cache on base_path_wfm for
+    funcionarios flows would miss the cached token and mint a second one."""
+    organizations = [{"organization_id": "org-1", "ids": ["x"]}]
+
+    handler({"tag": "funcionarios_adherencia", "organizations": organizations}, _context("a"))
+    handler({"tag": "surveys", "organizations": organizations}, _context("b"))
+
+    assert genesys_api["token_base_paths"] == [GENESYS_BASE_PATH, GENESYS_BASE_PATH]

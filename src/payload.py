@@ -64,3 +64,19 @@ def build_organization_entry(
 
 def build_payload(tag: str, organizations: list[dict[str, Any]]) -> dict[str, Any]:
     return {"tag": tag, "organization": organizations}
+
+
+# Where a flow's downloaded JSON is saved, by the tag's domain -- its first
+# segment ("funcionarios_adherencia" -> "funcionarios"). Workforce-management
+# data goes under config.output.base_path_wfm; everything else (transacciones:
+# surveys, conversations, ...) under config.output.base_path.
+OUTPUT_BASE_PATH_KEY_BY_DOMAIN = {"funcionarios": "base_path_wfm"}
+DEFAULT_OUTPUT_BASE_PATH_KEY = "base_path"
+
+
+def output_base_path(output_config: dict[str, Any], tag: str) -> str:
+    domain = tag.split("_", 1)[0]
+    key = OUTPUT_BASE_PATH_KEY_BY_DOMAIN.get(domain, DEFAULT_OUTPUT_BASE_PATH_KEY)
+    if key not in output_config:
+        raise ValueError(f"Tag {tag!r} is saved under config.output.{key}, which isn't set")
+    return output_config[key]

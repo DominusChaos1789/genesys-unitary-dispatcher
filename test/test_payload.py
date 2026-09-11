@@ -1,4 +1,6 @@
-from src.payload import build_organization_entry, build_payload, build_stage
+import pytest
+
+from src.payload import build_organization_entry, build_payload, build_stage, output_base_path
 from test.conftest import GENESYS_BASE_PATH, GENESYS_CONNECTION, GENESYS_SERVERS
 
 TOKEN = {"access_token": "abc"}
@@ -84,3 +86,23 @@ def test_payload_shape():
         "tag": "surveys",
         "organization": [{"organization_id": "org-1"}],
     }
+
+
+@pytest.mark.parametrize(
+    "tag, expected",
+    [
+        ("funcionarios_adherencia", "funcionarios/genesys/api"),
+        ("funcionarios", "funcionarios/genesys/api"),
+        ("surveys", "transacciones/genesys/api"),
+        ("conversaciones_encuestas", "transacciones/genesys/api"),
+    ],
+)
+def test_output_base_path_follows_the_tags_domain(tag, expected):
+    output = {"base_path": "transacciones/genesys/api", "base_path_wfm": "funcionarios/genesys/api"}
+
+    assert output_base_path(output, tag) == expected
+
+
+def test_an_output_base_path_missing_from_config_is_an_error():
+    with pytest.raises(ValueError, match="config.output.base_path_wfm"):
+        output_base_path({"base_path": "transacciones/genesys/api"}, "funcionarios_adherencia")

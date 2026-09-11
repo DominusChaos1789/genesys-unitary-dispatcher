@@ -78,6 +78,7 @@ def aws(aws_env):
 # through the runtime-control layer, none of which exists in tests.
 
 GENESYS_BASE_PATH = "transacciones/genesys/api"
+GENESYS_BASE_PATH_WFM = "funcionarios/genesys/api"
 GENESYS_CONNECTION = {
     "base_url": "https://api.{region_id}.pure.cloud",
     "header_template": {
@@ -108,7 +109,7 @@ GENESYS_CONFIG = {
     "secret": GENESYS_SECRETS,
     "connection": GENESYS_CONNECTION,
     "servers": GENESYS_SERVERS,
-    "config": {"output": {"base_path": GENESYS_BASE_PATH, "base_path_wfm": "funcionarios/genesys/api"}},
+    "config": {"output": {"base_path": GENESYS_BASE_PATH, "base_path_wfm": GENESYS_BASE_PATH_WFM}},
 }
 
 
@@ -116,7 +117,7 @@ GENESYS_CONFIG = {
 def genesys_api(monkeypatch):
     """Stubs the SSM config load and the per-organization token, recording
     how the handler used them."""
-    calls = {"load_config": [], "requested_orgs": []}
+    calls = {"load_config": [], "requested_orgs": [], "token_base_paths": []}
 
     def fake_load_config(path_params, region_name="us-east-2"):
         calls["load_config"].append((path_params, region_name))
@@ -124,6 +125,7 @@ def genesys_api(monkeypatch):
 
     def fake_get_token(secret, connection, base_path, server, resource_name, now=None):
         calls["requested_orgs"].append(server["oauth"])
+        calls["token_base_paths"].append(base_path)
         calls["resource_name"] = resource_name
         return {"access_token": f"token-for-{server['oauth']}", "expires_in": 86400}
 

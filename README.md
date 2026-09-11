@@ -81,7 +81,7 @@ drop an organization.
         "method": "GET",
         "headers": {"Authorization": "Bearer <org-1 token>", "Content-Type": "application/json"},
         "type": "unitary", "path": "users_managment_unit", "result_data": "state",
-        "base_path": "transacciones/genesys/api", "server_path": "org_id=1/"
+        "base_path": "funcionarios/genesys/api", "server_path": "org_id=1/"
       },
       "request_init": {"...": "...", "method": "POST", "payload": {"items": ["..."]}, "result_data": "jobId"},
       "request_status": {"...": "...", "url": ".../bulk/jobs/{jobId}", "result_data": "status"}
@@ -101,6 +101,16 @@ drop an organization.
   `payload`; the correct `body_template` spelling is accepted too.
   `params_template` becomes `params`.
 - `server_path` is the server's `relative_path` (`org_id=1/`).
+- `base_path` is the prefix the downloaded JSON is saved under, and it follows
+  the tag's **domain** (the tag's first segment):
+
+  | domain | config key | prefix |
+  |---|---|---|
+  | `funcionarios_*` (workforce management, e.g. adherence) | `config.output.base_path_wfm` | `funcionarios/genesys/api` |
+  | anything else — transacciones (surveys, conversations, ...) | `config.output.base_path` | `transacciones/genesys/api` |
+
+  A flow in a new domain needs an entry in `OUTPUT_BASE_PATH_KEY_BY_DOMAIN`
+  ([src/payload.py](src/payload.py)); a missing config key fails the run.
 
 The handler returns the payload plus `execution_id`, `payload_location`,
 `stages` and `failed_organizations`.
@@ -129,6 +139,9 @@ the region, `relative_path` and the `oauth` secret name; Secrets Manager gives
 `client_id`/`client_secret`. Tokens are cached in DynamoDB through the
 **runtime-control layer** (`runtime_control`) under the dataset
 `<base_path>/<relative_path>`, and re-minted only within 15 minutes of expiry.
+That key always uses `config.output.base_path`, even for `funcionarios` flows
+whose output goes under `base_path_wfm`: tokens are per organization, so a
+per-domain key would miss the cached token and mint a second one.
 `runtime_control` is imported lazily, so the code imports and tests run
 without the layer.
 
@@ -183,8 +196,6 @@ copies of the real `unitary.json`, `status.json` and `jobs.json`.
 - **Adherence job granularity.** The init body carries one `{user_id}`, i.e. a
   job per advisor. With `rate_limit_per_minute: 30`, a 200-advisor unit is
   ~7 minutes of POSTs before polling; the bulk body accepts several `userIds`.
-- **`base_path` vs `base_path_wfm`.** Every tag uses `config.output.base_path`
-  today; adherence may belong under `base_path_wfm`.
 - **Tokens at rest.** The payload embeds bearer tokens, so they're stored in the
   logs bucket and in Step Functions execution history for ~24h.
 - **OAuth credentials in the query string.** The token exchange sends
