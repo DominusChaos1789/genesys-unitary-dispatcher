@@ -194,7 +194,7 @@ def test_an_organization_without_a_servers_entry_is_reported_not_fatal(aws, gene
 
     assert list(_by_org(result)) == ["org-1"]
     assert result["failed_organizations"] == [
-        {"organization_id": "org-9", "error": "no servers entry for org_9"}
+        {"organization_id": "org-9", "ids": ["conv-9"], "error": "no servers entry for org_9"}
     ]
     assert genesys_api["requested_orgs"] == ["org-1"]
 
@@ -217,7 +217,9 @@ def test_a_token_failure_for_one_organization_does_not_drop_the_others(aws, monk
     result = handler(event, _context())
 
     assert list(_by_org(result)) == ["org-3"]
-    assert result["failed_organizations"] == [{"organization_id": "org-1", "error": "oauth down for org-1"}]
+    assert result["failed_organizations"] == [
+        {"organization_id": "org-1", "ids": ["conv-1"], "error": "oauth down for org-1"}
+    ]
 
 
 def test_no_ids_writes_an_empty_payload_without_touching_genesys(aws, genesys_api):

@@ -5,6 +5,10 @@ pipeline. It doesn't call the Genesys data APIs itself. It works out **which
 calls** a flow needs, **for which ids**, **with which credentials**, and writes
 that plan (the payload) where the next Lambdas can execute it.
 
+For the surveys flow it can also run the **contracts process** first: turn the
+providers' transcription files into parquet and take the conversation ids from
+them.
+
 Contents:
 
 1. [Where it sits](#1-where-it-sits)
@@ -46,9 +50,13 @@ What Request Unitary reads:
 | SSM `/augusta-nexa-<env>/genesys/api` | `connection` (URLs, header template, OAuth settings), `servers` (region per organization), `config` (output prefixes) |
 | Secrets Manager, same prefix | each organization's OAuth `client_id` / `client_secret` |
 | DynamoDB via the runtime-control layer | cached OAuth tokens |
+| `augusta-nexa-<env>-providers-landing` | transcription files, when the run uses the contracts process |
+| `CONTRACTS_PREFIX` in the resources bucket | the contracts, one per provider/operation |
 
 What it writes: one payload per run to
 `augusta-nexa-<env>-logs/transacciones/genesys/api/payload_request_unitary/<tag>/<execution_id>.json`.
+With the contracts process it also writes parquet to `augusta-nexa-<env>-refined`
+and deletes the transcription files it processed.
 
 ---
 
@@ -60,7 +68,7 @@ What it writes: one payload per run to
 | 2 | Execution id | The Lambda request id, or a UUID when there is no Lambda context. | `main.handler` |
 | 3 | Tag | `event.tag`, or `event.detail.tag` for EventBridge events. | `sources.resolve_tag` |
 | 4 | Stages | Load the `core.json` groups listed in `ENDPOINT_GROUPS`, keep the endpoints carrying this tag, and map each one's `type` to a stage. An unknown tag fails **here**, before any ids are read. | `endpoints.load_endpoint_catalog`, `endpoints.select_stages` |
-| 5 | Ids | From `event.organizations`, else the S3 file in `event.ids_location`, else the S3 object named in `event.detail`. Organizations merge, ids are de-duplicated and sorted, organizations without ids are dropped. | `sources.resolve_ids_by_organization` |
+| 5 | Ids | With `"ids_source": "contracts"`: run the [contracts process](#contracts-process-where-surveys-ids-come-from) and group its conversation ids by organization. Otherwise from `event.organizations`, else the S3 file in `event.ids_location`, else the S3 object named in `event.detail`. Organizations merge, ids are de-duplicated and sorted, organizations without ids are dropped. | `main._resolve_ids`, `contracts_process.run_contracts`, `sources.resolve_ids_by_organization` |
 | 6 | Genesys config | Once per run, and only if there are ids: `connection`, `servers`, `config` and the OAuth secrets. | `token_manager.load_config` |
 | 7 | Output prefix | Pick the prefix the downloaded JSON will be saved under, from the tag's domain. | `payload.output_base_path` |
 | 8 | Per organization | Find its `servers` entry → get its token → build one request template per stage. | `main._build_organizations`, `token_manager.get_token`, `payload.build_organization_entry` |
@@ -141,6 +149,36 @@ No change to this Lambda is needed for step 1. Step 2 is a one-line mapping.
 | Saved under | `transacciones/genesys/api` |
 | Next | Download calls the template once per conversation id. No job, no polling. |
 
+### Contracts process: where surveys ids come from
+
+The hourly schedule sends `{"tag": "surveys", "ids_source": "contracts"}`. Before
+building the payload, the run processes every contract under `CONTRACTS_PREFIX`
+(one per provider/operation: `bdo/sac`, `pel/sac`, `bpp/cob`), each on its own:
+
+```mermaid
+flowchart LR
+    C["contract<br/>transcripcion.json"] --> R["read transcription files<br/>providers-landing"]
+    R --> T["rename, cast, transform,<br/>deduplicate"]
+    T --> X["technical columns<br/>core + EAV rows"]
+    X --> P["write parquet<br/>refined"]
+    P --> D["delete processed<br/>source files"]
+    D --> G["conversation ids, grouped by<br/>the contract's organization"]
+```
+
+| Step | Code |
+|---|---|
+| Discover contracts (`CONTRACT_KEY` pins one) | `contract.list_contract_keys` |
+| Read files; unreadable ones are skipped and left in place | `s3_utils.read_json_files` |
+| Rename, cast, transform, deduplicate | `transform.build_rows`, `transform.dedup_rows` |
+| Technical columns; `output_core` and `output_atts` rows | `technical_columns.build_output_rows` |
+| Hive-partitioned parquet | `parquet_io.write_hive_parquet` |
+| Delete processed files | `s3_utils.delete_objects` |
+
+Deletion is the last step, so a contract that fails keeps its files for a
+re-run while the other contracts continue. Contracts that share an
+organization (`pel` and `bpp` on `org-2`) contribute to one organization entry
+and one token.
+
 ### `funcionarios_adherencia`
 
 | | |
@@ -216,10 +254,13 @@ per-flow key would miss the cached token and request a second one.
 | No endpoints carry the tag; a tagged endpoint's `type` maps to no stage; two endpoints for the same stage | run fails, before ids are read |
 | `core.json` lacks a configured group; one endpoint defined differently in two files | run fails |
 | Event gives no ids source; an organization entry lacks `organization_id` or `ids` | run fails |
+| `ids_source` is anything other than `contracts` | run fails, before any file is touched |
 | `config.output` lacks the prefix key for the tag's domain | run fails |
 | No ids at all | empty payload written; Genesys and SSM are not called |
-| An organization has no `servers` entry | listed in `failed_organizations`; the others continue |
-| An organization's token can't be obtained | listed in `failed_organizations`; the others continue |
+| An organization has no `servers` entry | listed in `failed_organizations` with its ids; the others continue |
+| An organization's token can't be obtained | listed in `failed_organizations` with its ids; the others continue |
+| A contract fails (malformed contract, parquet write error, ...) | listed in `contracts.failed_contracts`; its source files stay; the other contracts continue |
+| A transcription file can't be read | skipped and left in place; the rest of that contract runs |
 
 Configuration problems fail the whole run, since every organization would hit
 them. Problems specific to one organization only affect that organization.
@@ -230,7 +271,12 @@ them. Problems specific to one organization only affect that organization.
 
 | File | Responsibility |
 |---|---|
-| [src/main.py](../src/main.py) | `handler`: runs the steps above; `_build_organizations`: the per-organization loop |
+| [src/main.py](../src/main.py) | `handler`: runs the steps above; `_resolve_ids`: event or contracts process; `_build_organizations`: the per-organization loop |
+| [src/contracts_process.py](../src/contracts_process.py) | the contracts process: per-contract loop, parquet writes, source deletion, ids by organization |
+| [src/contract.py](../src/contract.py) | the contract model; contract discovery and loading |
+| [src/transform.py](../src/transform.py) | source record → business row: rename, cast, transformations, dedup |
+| [src/technical_columns.py](../src/technical_columns.py) | technical columns engine; `output_core` / `output_atts` rows |
+| [src/parquet_io.py](../src/parquet_io.py) | Hive-partitioned parquet writes with polars |
 | [src/config.py](../src/config.py) | environment variables → `Settings`; bucket and key naming |
 | [src/sources.py](../src/sources.py) | the tag and the ids from the event (inline, S3 file, or S3 event) |
 | [src/endpoints.py](../src/endpoints.py) | loads the endpoint catalog; selects and orders a tag's stages |

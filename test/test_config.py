@@ -98,3 +98,20 @@ def test_payload_log_key_template(monkeypatch):
     monkeypatch.setenv("PAYLOAD_LOG_KEY_TEMPLATE", "logs/{tag}.json")
 
     assert load_settings().payload_log_key("surveys", "req-1") == "logs/surveys.json"
+
+
+def test_contracts_process_defaults():
+    settings = load_settings()
+
+    assert settings.contracts_prefix == "contracts/entrada/transacciones/empatia/transcripciones/"
+    assert settings.contract_key == ""
+
+
+def test_contracts_process_overrides(monkeypatch):
+    monkeypatch.setenv("CONTRACTS_PREFIX", "contracts/other/")
+    monkeypatch.setenv("CONTRACT_KEY", "contracts/other/x/sac/transcripcion.json")
+
+    settings = load_settings()
+
+    assert settings.contracts_prefix == "contracts/other/"
+    assert settings.contract_key == "contracts/other/x/sac/transcripcion.json"

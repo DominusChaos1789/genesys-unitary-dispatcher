@@ -11,3 +11,6 @@ requests>=2.31
 #
 # runtime_control (the DynamoDB execution log used as the token cache) is NOT
 # installed here: it comes from the augusta-nexa-<env>-runtime-control layer.
+#
+# polars (parquet writes in the contracts process) is NOT installed here
+# either: it comes from the polars layer (layers/polars, polars-lts-cpu).

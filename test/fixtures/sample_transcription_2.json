@@ -1,0 +1,24 @@
+{
+  "tenant_id": "banco_occidente",
+  "client_dni": "1122334455",
+  "client_dni_type": "CC",
+  "genesys_cloud_id": "7b1fa3c2-91aa-4e2b-9d3a-0b2f6a7c1234",
+  "trace_id": "aa11bb22cc33dd44ee55ff6677889900",
+  "interaction_result": "resuelto",
+  "started_at": "2026-08-16T09:12:00-05:00",
+  "exported_at": "2026-08-16T09:20:45-05:00",
+  "turns": 3,
+  "messages": [
+    {
+      "role": "assistant",
+      "content": "Buenos días, ¿en qué le puedo ayudar hoy?"
+    },
+    {
+      "role": "user",
+      "content": "Necesito el estado de mi tarjeta."
+    }
+  ],
+  "person_type": "Natural",
+  "client_name": "  Andres  ",
+  "client_last_name": "Niño"
+}

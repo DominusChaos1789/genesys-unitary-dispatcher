@@ -14,6 +14,8 @@ DEFAULT_ENDPOINT_GROUPS = ("unitary", "status")
 DEFAULT_PAYLOAD_LOG_KEY_TEMPLATE = (
     "transacciones/genesys/api/payload_request_unitary/{tag}/{execution_id}.json"
 )
+# Every .json under this prefix is a contract, one per provider/operation pair.
+DEFAULT_CONTRACTS_PREFIX = "contracts/entrada/transacciones/empatia/transcripciones/"
 
 
 def normalize_env_token(value: str) -> str:
@@ -55,6 +57,11 @@ class Settings:
     # Identifies this Lambda in the runtime-control DynamoDB log, which is
     # where OAuth tokens are cached between runs.
     resource_name: str
+    # Contracts process (ids_source "contracts"): every .json under
+    # contracts_prefix is a contract; contract_key, when set, pins the run to
+    # that single contract instead.
+    contracts_prefix: str
+    contract_key: str
 
     def resolve_bucket(self, name: str) -> str:
         """ "landing" -> "augusta-nexa-dev-landing"; full names pass through."""
@@ -86,4 +93,6 @@ def load_settings() -> Settings:
         api_genesys_params=os.environ.get("API_GENESYS_PARAMS", f"/{stack}/genesys/api"),
         region=os.environ.get("REGION", "us-east-2"),
         resource_name=os.environ.get("RESOURCE_NAME", f"{stack}-genesys-api-unitary-request"),
+        contracts_prefix=os.environ.get("CONTRACTS_PREFIX", DEFAULT_CONTRACTS_PREFIX),
+        contract_key=os.environ.get("CONTRACT_KEY", ""),
     )

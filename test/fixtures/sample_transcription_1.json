@@ -1,0 +1,32 @@
+{
+  "tenant_id": "banco_occidente",
+  "client_dni": "14984986",
+  "client_dni_type": "CC",
+  "genesys_cloud_id": "2a0db425-2370-4786-be61-1a9ee8e89855",
+  "trace_id": "5624561b59ae99a0fae1e65cc206e4a1",
+  "interaction_result": "",
+  "started_at": "2026-08-16T15:53:07-05:00",
+  "exported_at": "2026-08-16T15:57:24-05:00",
+  "turns": 7,
+  "messages": [
+    {
+      "role": "assistant",
+      "content": "¡Buenas tardes Vimarasio! Soy el agente virtual del Banco de Occidente. Estoy aquí para resolver sus casos más rápido y acompañar s"
+    },
+    {
+      "role": "user",
+      "content": "Que no puedo. No puedo, no me puedo meter al portal del banco. Se me fue la clave, necesito pagar una vaina yo mismo. Rapidito."
+    },
+    {
+      "role": "assistant",
+      "content": "Entiendo su urgencia y que necesita acceder rápidamente. lo revisamos juntos. ¿Está intentando entrar desde la aplicación del celul"
+    },
+    {
+      "role": "user",
+      "content": "¿No? ¿La página del computador?"
+    }
+  ],
+  "person_type": "Natural",
+  "client_name": "VIMARASIO",
+  "client_last_name": "CHAVES"
+}

@@ -4,3 +4,6 @@ pytest-cov>=5.0
 moto[s3,ssm,secretsmanager]>=5.0
 black>=24.0
 flake8>=7.0
+# zoneinfo has no built-in time zone database on Windows (or slim images):
+# polars needs one to hand UTC timestamps back to Python in the tests.
+tzdata>=2024.1

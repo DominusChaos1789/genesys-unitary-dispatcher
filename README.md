@@ -8,11 +8,12 @@ Function.
 **How it works** — step-by-step logic, diagrams, token handling and failure
 behavior: [docs/how-it-works.md](docs/how-it-works.md).
 
-This repo contains only Request Unitary. **Unitary Status** (polls a jobId
-until the job completes) and **Unitary Download** (fetches the result into
-`landing`) read the payload this Lambda writes, and live elsewhere. The hourly
-contracts ETL (transcriptions → parquet with technical columns) is also a
-separate pipeline; it's one of the sources that can feed ids into a tag here.
+This repo contains Request Unitary and the **contracts process** it can run as
+an ids source: transcription files → parquet (core + EAV attributes, with
+technical columns) → conversation ids per Genesys organization. **Unitary
+Status** (polls a jobId until the job completes) and **Unitary Download**
+(fetches the result into `landing`) read the payload this Lambda writes, and
+live elsewhere.
 
 ```
 EventBridge (event / scheduled) ──► Step Function ──► Request Unitary ──► logs bucket
@@ -68,6 +69,18 @@ Organizations repeated across entries are merged, ids are de-duplicated and
 sorted, and organizations with no ids are dropped. An entry missing
 `organization_id` or `ids` is an error, so a typo like `"id"` can't silently
 drop an organization.
+
+### Ids from the contracts process
+
+```json
+{"tag": "surveys", "ids_source": "contracts"}
+```
+
+Typically sent by the hourly schedule. The run first executes the
+[contracts process](#contracts-process) and uses the conversation ids it
+finds, grouped by each contract's organization. The process is imported only
+for these runs, so other flows don't load polars. Any other `ids_source`
+value fails the run before any file is touched.
 
 ## Payload
 
@@ -136,8 +149,41 @@ next states instead of rebuilding the key.
 - Unknown tag, or a misconfigured catalog → the invocation fails, **before**
   any ids are read.
 - An organization with no `servers` entry, or whose token can't be obtained →
-  listed in `failed_organizations`; the other organizations still get entries.
+  listed in `failed_organizations` **with its ids**; the other organizations
+  still get entries. With the contracts process the source files are already
+  deleted at that point, so this is where those ids survive.
 - No ids at all → an empty payload is still written, and Genesys isn't called.
+
+## Contracts process
+
+Every `.json` under `CONTRACTS_PREFIX` is a contract, one per provider and
+operation (`bdo/sac`, `pel/sac`, `bpp/cob`); `CONTRACT_KEY` pins a run to one.
+Each contract runs independently:
+
+1. Read the JSON files under its `source.prefix_pattern` in
+   `augusta-nexa-<env>-providers-landing`. Unreadable files are skipped and
+   left in place.
+2. Rename, cast and transform the columns per the contract, then deduplicate.
+3. Compute the `technical_columns` and split the rows into `output_core` (one
+   row per conversation) and `output_atts` (one row per business column).
+4. Write both as Hive-partitioned parquet to `augusta-nexa-<env>-refined`:
+   `<prefix>/cliente_prefijo=<X>/operacion_prefijo=<Y>/year=YYYY/month=MM/day=DD/<output_name_file>_<timestamp>.parquet`.
+5. Delete the source files that were processed.
+
+The conversation ids are grouped by each contract's
+`genesys_cloud_organization`, so contracts sharing an organization share one
+entry and one token. A contract that fails is listed in
+`contracts.failed_contracts` and keeps its source files, because deletion is
+the last step; the other contracts still run. The response includes a
+`contracts` summary with each contract's file counts and parquet keys.
+
+Known gaps in the contract itself:
+
+- `archivo_fecha_id` is listed in `output_atts.technical_col_keep` but has no
+  `technical_columns` entry in the original contract. The test fixture adds one
+  (`calculus_type: file_landing_date`); the contract in S3 needs the same.
+- `gestion_tipo` / `gestion_canal` are kept in `output_core` without a
+  `technical_columns` entry, so they're written as empty string columns.
 
 ## Tokens
 
@@ -167,16 +213,29 @@ All optional.
 | `API_GENESYS_PARAMS` | `/augusta-nexa-<env>/genesys/api` | SSM path for `connection`/`servers`/`config`; OAuth secrets share the prefix. |
 | `REGION` | `us-east-2` | SSM / Secrets Manager region. |
 | `RESOURCE_NAME` | `augusta-nexa-<env>-genesys-api-unitary-request` | Name in the runtime-control log (token cache). |
+| `CONTRACTS_PREFIX` | `contracts/entrada/transacciones/empatia/transcripciones/` | Contracts process: every `.json` under it is a contract. |
+| `CONTRACT_KEY` | *(unset)* | Contracts process: pin the run to this one contract. |
 
 ## Deployment
 
 - Handler: `src.main.handler`, Python 3.13.
 - Package from [requirements-lambda.txt](requirements-lambda.txt) (`boto3`,
-  `requests`). No polars/parquet here, so no extra data layer is needed.
-- Layer: `augusta-nexa-<env>-runtime-control`.
+  `requests`).
+- Layers: `augusta-nexa-<env>-runtime-control`, plus the polars layer
+  ([layers/polars](layers/polars/requirements.txt), `polars-lts-cpu`) for runs
+  with `"ids_source": "contracts"`. The layer has to be built for Lambda's
+  Linux x86_64 / Python 3.13, not the machine running pip:
+
+  ```bash
+  pip install -r layers/polars/requirements.txt --platform manylinux2014_x86_64 --python-version 3.13 --implementation cp --abi cp313 --only-binary=:all: -t layers/polars/build/python
+  ```
 - IAM:
   - `s3:GetObject` on the resources bucket and on wherever ids files land
   - `s3:PutObject` on `augusta-nexa-<env>-logs/*`
+  - contracts process: `s3:ListBucket` on the resources bucket (contract
+    discovery); `s3:ListBucket`, `s3:GetObject` and `s3:DeleteObject` on
+    `augusta-nexa-<env>-providers-landing`; `s3:PutObject` on
+    `augusta-nexa-<env>-refined/*`
   - `ssm:GetParametersByPath` on `/augusta-nexa-<env>/genesys/api/*`
   - `secretsmanager:ListSecrets` (`*`) and `secretsmanager:GetSecretValue` on that prefix
   - whatever `runtime_control` needs on `augusta-nexa-<env>-runtime-data`
@@ -192,8 +251,10 @@ python -m venv .venv
 ```
 
 Tests use moto for S3/SSM/Secrets Manager and stub the token lookup — no AWS
-credentials or network needed. The endpoint files in `test/fixtures/` are
-copies of the real `unitary.json`, `status.json` and `jobs.json`.
+credentials or network needed. `test/fixtures/` holds the endpoint files
+(`unitary.json` with the per-management-unit adherence config, `status.json`,
+`jobs.json`), the BDO `transcripcion.json` contract and two sample
+transcriptions.
 
 ## Open items
 
