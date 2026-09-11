@@ -1,0 +1,41 @@
+{
+    "conversations_surveys": {
+        "tag": "surveys",
+        "url": "/api/v2/quality/conversations/{conversationId}/surveys",
+        "type": "unitary",
+        "method": "GET",
+        "path": "conversations_surveys",
+        "result_data": "state"
+    },
+    "users_managment_unit": {
+        "url": "/api/v2/workforcemanagement/managementunits/{mu_id}/users",
+        "tag": "funcionarios_adherencia",
+        "type": "unitary",
+        "method": "GET",
+        "path": "users_managment_unit",
+        "result_data": "state"
+    },
+    "adherence_historical_init": {
+        "url": "/api/v2/workforcemanagement/adherence/historical/bulk",
+        "tag": "funcionarios_adherencia",
+        "type": "init",
+        "method": "POST",
+        "path": "adherence_details",
+        "body_templante": {
+            "items": [
+                {
+                    "managementUnitId": "{mu_id}",
+                    "startDate": "{star_date}",
+                    "endDate": "{end_date}",
+                    "userIds": [
+                        "{user_id}"
+                    ],
+                    "includeExceptions": true,
+                    "includeActuals": true
+                }
+            ],
+            "timeZone": "America/Bogota"
+        },
+        "result_data": "jobId"
+    }
+}

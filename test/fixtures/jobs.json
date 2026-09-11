@@ -1,0 +1,50 @@
+{
+    "conversations_details_init": {
+        "url": "/api/v2/analytics/conversations/details/jobs",
+        "type": "init",
+        "method": "POST",
+        "path": "conversations_details",
+        "body_templante": {
+            "startOfDayIntervalMatching": true,
+            "interval": "{time_interval}",
+            "order": "asc",
+            "orderBy": "conversationStart"
+        },
+        "result_data": "jobId"
+    },
+    "conversations_details_results": {
+        "url": "/api/v2/analytics/conversations/details/jobs/{job_id}/results",
+        "type": "result",
+        "method": "GET",
+        "path": "conversations_details",
+        "params_template": {
+            "pageSize": "{page_size}",
+            "cursor": "{cursor}"
+        },
+        "result_data": "cursor"
+    },
+    "users_details_init": {
+        "url": "/api/v2/analytics/users/details/jobs",
+        "type": "init",
+        "method": "POST",
+        "path": "users_details",
+        "body_templante": {
+            "startOfDayIntervalMatching": true,
+            "interval": "{time_interval}",
+            "order": "asc",
+            "orderBy": "conversationStart"
+        },
+        "result_data": "jobId"
+    },
+    "users_details_results": {
+        "url": "/api/v2/analytics/users/details/jobs/{job_id}/results",
+        "type": "result",
+        "method": "GET",
+        "path": "users_details_results",
+        "params_template": {
+            "pageSize": "{page_size}",
+            "cursor": "{cursor}"
+        },
+        "result_data": "cursor"
+    }
+}

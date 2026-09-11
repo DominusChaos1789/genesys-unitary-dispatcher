@@ -1,0 +1,89 @@
+"""Environment-driven configuration for the Request Unitary dispatcher."""
+
+import os
+from dataclasses import dataclass
+
+BUCKET_NAMESPACE = "augusta-nexa"
+DEFAULT_CORE_CONFIG_KEY = "params/genesys/api/core.json"
+# Only the core.json groups that hold tagged endpoints. core.json also lists
+# daily/ondemand/actions files that this Lambda has no use for.
+DEFAULT_ENDPOINT_GROUPS = ("unitary", "status")
+# Tag + execution id in the key: Unitary Status and Unitary Download read the
+# payload back from here, so two flows running close together must never
+# overwrite each other's file.
+DEFAULT_PAYLOAD_LOG_KEY_TEMPLATE = (
+    "transacciones/genesys/api/payload_request_unitary/{tag}/{execution_id}.json"
+)
+
+
+def normalize_env_token(value: str) -> str:
+    """ "dev", "augusta-nexa-dev" and "augusta-nexa-dev-" all mean "dev"."""
+    token = value.strip().strip("-")
+    prefix = f"{BUCKET_NAMESPACE}-"
+    if token.startswith(prefix):
+        token = token[len(prefix) :]
+    return token.strip("-")
+
+
+def _resolve_env_token() -> str:
+    """The deploy pipeline sets ENVIRONMENT/PROFILE (dev/stg/pro) and STACK_ID
+    (augusta-nexa-<env>) rather than ENV_PREFIX, so fall back through all of
+    them -- defaulting straight to dev would point stg/pro at dev buckets."""
+    for name in ("ENV_PREFIX", "ENVIRONMENT", "PROFILE", "STACK_ID"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            return normalize_env_token(value)
+    return "dev"
+
+
+def _split_csv(value: str) -> tuple[str, ...]:
+    return tuple(part.strip() for part in value.split(",") if part.strip())
+
+
+@dataclass(frozen=True)
+class Settings:
+    env: str
+    resources_bucket: str
+    core_config_key: str
+    endpoint_groups: tuple[str, ...]
+    payload_log_bucket: str
+    payload_log_key_template: str
+    # SSM path holding the Genesys connection/servers/config parameters; the
+    # per-organization OAuth secrets share the same prefix in Secrets Manager.
+    api_genesys_params: str
+    region: str
+    # Identifies this Lambda in the runtime-control DynamoDB log, which is
+    # where OAuth tokens are cached between runs.
+    resource_name: str
+
+    def resolve_bucket(self, name: str) -> str:
+        """ "landing" -> "augusta-nexa-dev-landing"; full names pass through."""
+        if name.startswith(f"{BUCKET_NAMESPACE}-"):
+            return name
+        return f"{BUCKET_NAMESPACE}-{self.env}-{name}"
+
+    def payload_log_key(self, tag: str, execution_id: str) -> str:
+        return self.payload_log_key_template.format(tag=tag, execution_id=execution_id)
+
+
+def load_settings() -> Settings:
+    env = _resolve_env_token()
+    stack = f"{BUCKET_NAMESPACE}-{env}"
+
+    def bucket(env_name: str, logical_name: str) -> str:
+        # The pipeline passes logical names ("resources", "logs"); a full
+        # bucket name is accepted as-is.
+        value = os.environ.get(env_name, logical_name).strip()
+        return value if value.startswith(f"{BUCKET_NAMESPACE}-") else f"{stack}-{value}"
+
+    return Settings(
+        env=env,
+        resources_bucket=bucket("RESOURCES_BUCKET", "resources"),
+        core_config_key=os.environ.get("CORE_CONFIG_KEY", DEFAULT_CORE_CONFIG_KEY),
+        endpoint_groups=_split_csv(os.environ.get("ENDPOINT_GROUPS", ",".join(DEFAULT_ENDPOINT_GROUPS))),
+        payload_log_bucket=bucket("PAYLOAD_LOG_BUCKET", "logs"),
+        payload_log_key_template=os.environ.get("PAYLOAD_LOG_KEY_TEMPLATE", DEFAULT_PAYLOAD_LOG_KEY_TEMPLATE),
+        api_genesys_params=os.environ.get("API_GENESYS_PARAMS", f"/{stack}/genesys/api"),
+        region=os.environ.get("REGION", "us-east-2"),
+        resource_name=os.environ.get("RESOURCE_NAME", f"{stack}-genesys-api-unitary-request"),
+    )

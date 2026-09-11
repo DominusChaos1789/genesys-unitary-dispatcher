@@ -1,0 +1,13 @@
+# Deployment-package manifest: what the packaging step should `pip install -t`
+# and zip. No dev tooling (pytest, moto, black, flake8).
+#
+# boto3 is pinned even though the Lambda runtime ships it, so the API surface
+# doesn't depend on whatever version the runtime happens to bundle.
+boto3>=1.34
+# requests is NOT importable in the Lambda Python runtime (botocore's vendored
+# copy isn't exposed as `requests`), so it has to ship in the package -- it's
+# used for the OAuth client_credentials exchange.
+requests>=2.31
+#
+# runtime_control (the DynamoDB execution log used as the token cache) is NOT
+# installed here: it comes from the augusta-nexa-<env>-runtime-control layer.

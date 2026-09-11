@@ -1,0 +1,38 @@
+{
+    "conversations_details_status": {
+        "url": "/api/v2/analytics/conversations/details/jobs/{job_id}",
+        "type": "status",
+        "method": "GET",
+        "path": "conversations_details",
+        "result_data": "status"
+    },
+    "users_details_status": {
+        "url": "/api/v2/analytics/users/details/jobs/{job_id}",
+        "type": "status",
+        "method": "GET",
+        "path": "users_details",
+        "result_data": "status"
+    },
+    "contactlist_import_status": {
+        "url": "/api/v2/outbound/contactlists/{contactlist_id}/importstatus",
+        "type": "status",
+        "method": "GET",
+        "path": "contactlists_import",
+        "result_data": "state"
+    },
+    "dnclist_import_status": {
+        "url": "/api/v2/outbound/dnclists/{dnclist_id}/importstatus",
+        "type": "status",
+        "method": "GET",
+        "path": "dnclists_import",
+        "result_data": "state"
+    },
+    "adherence_agent_status": {
+        "url": "/api/v2/workforcemanagement/adherence/historical/bulk/jobs/{jobId}",
+        "tag": "funcionarios_adherencia",
+        "type": "status",
+        "method": "GET",
+        "path": "adherence_agent_details",
+        "result_data": "status"
+    }
+}
