@@ -1,9 +1,9 @@
 # genesys-unitary-dispatcher
 
 **Request Unitary** — the multi-tag dispatcher Lambda for Genesys Cloud. Each
-invocation runs one **tag** (one workflow), builds a payload with an entry per
-Genesys organization, writes it to the logs bucket and returns it for the Step
-Function.
+invocation runs one or more **tags** (workflows), builds one payload per tag
+with an entry per Genesys organization, writes it to the logs bucket and
+returns its location for the Step Function.
 
 **How it works** — step-by-step logic, diagrams, token handling and failure
 behavior: [docs/how-it-works.md](docs/how-it-works.md).
