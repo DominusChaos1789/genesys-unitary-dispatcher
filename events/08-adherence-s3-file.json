@@ -1,0 +1,7 @@
+{
+  "tag": "funcionarios_adherencia",
+  "ids_location": {
+    "bucket": "landing",
+    "key": "funcionarios/genesys/api/management_units/2026-08-13.json"
+  }
+}

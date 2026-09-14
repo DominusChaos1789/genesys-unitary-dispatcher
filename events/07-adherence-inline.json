@@ -1,0 +1,11 @@
+{
+  "tag": "funcionarios_adherencia",
+  "organizations": [
+    {
+      "organization_id": "org-1",
+      "ids": [
+        "REPLACE_WITH_MU_ID"
+      ]
+    }
+  ]
+}

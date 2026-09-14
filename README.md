@@ -303,6 +303,12 @@ All optional.
   - `secretsmanager:ListSecrets` (`*`) and `secretsmanager:GetSecretValue` on that prefix
   - whatever `runtime_control` needs on `augusta-nexa-<env>-runtime-data`
 
+## Testing in the AWS console
+
+[events/](events/README.md) has one test event per use case (surveys, conversations
+download, several tags, contracts, adherence, EventBridge S3, and the error
+cases), with what each one touches and what it should return.
+
 ## Development
 
 ```bash
