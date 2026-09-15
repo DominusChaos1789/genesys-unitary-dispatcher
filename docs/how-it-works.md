@@ -55,8 +55,9 @@ What Request Unitary reads:
 | `augusta-nexa-<env>-landing`, `conversations_details/` | the day's downloaded conversations, when the run uses that source (read-only) |
 | `CONTRACTS_PREFIX` in the resources bucket | the contracts, one per provider/operation |
 
-What it writes: one flat payload file **per organization per tag** to
-`augusta-nexa-<env>-logs/transacciones/genesys/api/payload_request_unitary/<tag>/<execution_id>/<organization_id>.json`.
+What it writes: one flat payload file **per organization per tag**, at a
+fixed location (not one per execution) that a later run overwrites, to
+`augusta-nexa-<env>-logs/transacciones/genesys/api/payload_request_unitary/<tag>/<organization_id>.json`.
 With the contracts process it also writes parquet to `augusta-nexa-<env>-refined`
 and deletes the transcription files it processed.
 
@@ -74,8 +75,8 @@ and deletes the transcription files it processed.
 | 6 | Genesys config | Once per run, and only if there are ids: `connection`, `servers`, `config` and the OAuth secrets. | `token_manager.load_config` |
 | 7 | Output prefix | Resolve each tag's output-prefix key (from step 4) against `config.output` (SSM). | `payload.output_base_path` |
 | 8 | Per organization | Find its `servers` entry → get its token (once, for every tag) → build its entry for each tag, one request template per stage. | `main._build_organizations`, `token_manager.get_token`, `payload.build_organization_entry` |
-| 9 | Write | Save one **flat** file per (tag, organization) pair, `{"tag", "organization_id", "ids", <stages>, "failed_organizations"}`, to the logs bucket. | `main._write_payloads`, `payload.build_organization_payload` |
-| 10 | Return | A list, one entry per (tag, organization) pair written: `{execution_id, bucket, payload_location, organization_id, stages, failed_organizations, tag}`. `payload_location` is the key; failed organizations carry an id count. The detailed summary is logged, and the payload itself is never returned (Step Functions' 256 KB limit). | `main.handler`, `main.run` |
+| 9 | Write | Save one **flat** file per (tag, organization) pair, `{"tag", "organization_id", "ids", <stages>, "failed_organizations"}`, to a **fixed** key (no execution id) that a later run overwrites. | `main._write_payloads`, `payload.build_organization_payload` |
+| 10 | Return | A list, one entry per (tag, organization) pair written: `{bucket, payload_location, organization_id, stages, failed_organizations, tag}`. No execution id in the response either — it's in the logged summary only. `payload_location` is the key; failed organizations carry an id count. The payload itself is never returned (Step Functions' 256 KB limit). | `main.handler`, `main.run` |
 
 ```mermaid
 sequenceDiagram

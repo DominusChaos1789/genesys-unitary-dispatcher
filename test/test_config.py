@@ -91,13 +91,15 @@ def test_resolve_bucket():
 
 
 def test_payload_log_key_template(monkeypatch):
-    assert load_settings().payload_log_key("surveys", "req-1", "org-3") == (
-        "transacciones/genesys/api/payload_request_unitary/surveys/req-1/org-3.json"
+    # A fixed key per (tag, organization) -- no execution id -- so each run
+    # overwrites the previous payload for that pair.
+    assert load_settings().payload_log_key("surveys", "org-3") == (
+        "transacciones/genesys/api/payload_request_unitary/surveys/org-3.json"
     )
 
     monkeypatch.setenv("PAYLOAD_LOG_KEY_TEMPLATE", "logs/{tag}/{organization_id}.json")
 
-    assert load_settings().payload_log_key("surveys", "req-1", "org-3") == "logs/surveys/org-3.json"
+    assert load_settings().payload_log_key("surveys", "org-3") == "logs/surveys/org-3.json"
 
 
 def test_dispatcher_config_key_default_and_override(monkeypatch):

@@ -9,12 +9,14 @@ DEFAULT_DISPATCHER_CONFIG_KEY = "params/genesys/api/dispatcher.json"
 # Only the core.json groups that hold tagged endpoints. core.json also lists
 # daily/ondemand/actions files that this Lambda has no use for.
 DEFAULT_ENDPOINT_GROUPS = ("unitary", "status")
-# Tag + execution id + organization id in the key: Unitary Status and Unitary
-# Download read the payload back from here, and each organization gets its
-# own flat file (see payload.build_organization_payload), so two flows or two
-# organizations running close together must never overwrite each other's file.
+# Tag + organization id in the key -- one fixed location per (tag,
+# organization) pair, not one per execution: Unitary Status and Unitary
+# Download always read the same, latest path, and each run's payload
+# overwrites the previous one for that pair. Each organization gets its own
+# flat file (see payload.build_organization_payload), so two different
+# organizations never collide with each other.
 DEFAULT_PAYLOAD_LOG_KEY_TEMPLATE = (
-    "transacciones/genesys/api/payload_request_unitary/{tag}/{execution_id}/{organization_id}.json"
+    "transacciones/genesys/api/payload_request_unitary/{tag}/{organization_id}.json"
 )
 # Every .json under this prefix is a contract, one per provider/operation pair.
 DEFAULT_CONTRACTS_PREFIX = "contracts/entrada/transacciones/empatia/transcripciones/"
@@ -79,10 +81,8 @@ class Settings:
             return name
         return f"{BUCKET_NAMESPACE}-{self.env}-{name}"
 
-    def payload_log_key(self, tag: str, execution_id: str, organization_id: str) -> str:
-        return self.payload_log_key_template.format(
-            tag=tag, execution_id=execution_id, organization_id=organization_id
-        )
+    def payload_log_key(self, tag: str, organization_id: str) -> str:
+        return self.payload_log_key_template.format(tag=tag, organization_id=organization_id)
 
 
 def load_settings() -> Settings:

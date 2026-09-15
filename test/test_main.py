@@ -63,18 +63,16 @@ def test_surveys_writes_one_flat_file_per_organization(aws, genesys_api):
     responses = sorted(result["responses"], key=lambda r: r["organization_id"])
     assert responses == [
         {
-            "execution_id": "req-123",
             "bucket": LOGS_BUCKET,
-            "payload_location": f"{PAYLOAD_PREFIX}/surveys/req-123/org-1.json",
+            "payload_location": f"{PAYLOAD_PREFIX}/surveys/org-1.json",
             "organization_id": "org-1",
             "stages": ["request_context"],
             "failed_organizations": [],
             "tag": "surveys",
         },
         {
-            "execution_id": "req-123",
             "bucket": LOGS_BUCKET,
-            "payload_location": f"{PAYLOAD_PREFIX}/surveys/req-123/org-3.json",
+            "payload_location": f"{PAYLOAD_PREFIX}/surveys/org-3.json",
             "organization_id": "org-3",
             "stages": ["request_context"],
             "failed_organizations": [],
@@ -210,17 +208,32 @@ def test_one_token_per_organization_not_per_stage(aws, genesys_api):
     assert genesys_api["requested_orgs"] == ["org-1", "org-3"]
 
 
-def test_payload_file_is_written_under_tag_execution_id_and_organization(aws):
+def test_payload_file_is_written_under_tag_and_organization(aws):
     event = {"tag": "surveys", "organizations": [{"organization_id": "org-1", "ids": ["conv-1"]}]}
 
     result = run(event, _context("req-abc"))
 
-    key = f"{PAYLOAD_PREFIX}/surveys/req-abc/org-1.json"
+    key = f"{PAYLOAD_PREFIX}/surveys/org-1.json"
     assert responses_for(result)[0]["payload_location"] == key
     written = json.loads(aws["s3"].get_object(Bucket=LOGS_BUCKET, Key=key)["Body"].read())
     assert set(written) == {"tag", "organization_id", "ids", "request_context", "failed_organizations"}
     assert written["tag"] == "surveys"
     assert written["failed_organizations"] == []
+
+
+def test_a_second_run_for_the_same_tag_and_organization_overwrites_the_file(aws):
+    event_a = {"tag": "surveys", "organizations": [{"organization_id": "org-1", "ids": ["conv-1"]}]}
+    event_b = {"tag": "surveys", "organizations": [{"organization_id": "org-1", "ids": ["conv-2"]}]}
+
+    result_a = run(event_a, _context("req-a"))
+    result_b = run(event_b, _context("req-b"))
+
+    # Same fixed key both times -- no execution id in the path.
+    key = f"{PAYLOAD_PREFIX}/surveys/org-1.json"
+    assert responses_for(result_a)[0]["payload_location"] == key
+    assert responses_for(result_b)[0]["payload_location"] == key
+    # The second run's content replaced the first's.
+    assert read_payload(result_b)["ids"] == ["conv-2"]
 
 
 def test_payloads_for_different_tags_do_not_overwrite_each_other(aws):
@@ -230,10 +243,8 @@ def test_payloads_for_different_tags_do_not_overwrite_each_other(aws):
     run({"tag": "surveys", "organizations": organizations}, _context("same-id"))
     run({"tag": "funcionarios_adherencia", "organizations": organizations}, _context("same-id"))
 
-    surveys = s3.get_object(Bucket=LOGS_BUCKET, Key=f"{PAYLOAD_PREFIX}/surveys/same-id/org-1.json")
-    adherence = s3.get_object(
-        Bucket=LOGS_BUCKET, Key=f"{PAYLOAD_PREFIX}/funcionarios_adherencia/same-id/org-1.json"
-    )
+    surveys = s3.get_object(Bucket=LOGS_BUCKET, Key=f"{PAYLOAD_PREFIX}/surveys/org-1.json")
+    adherence = s3.get_object(Bucket=LOGS_BUCKET, Key=f"{PAYLOAD_PREFIX}/funcionarios_adherencia/org-1.json")
     assert json.loads(surveys["Body"].read())["tag"] == "surveys"
     assert json.loads(adherence["Body"].read())["tag"] == "funcionarios_adherencia"
 
@@ -246,10 +257,10 @@ def test_several_tags_share_the_ids_and_one_token_per_organization(aws, genesys_
     assert result["tags"] == ["surveys", "recordings"]
     locations = sorted(r["payload_location"] for r in result["responses"])
     assert locations == [
-        f"{PAYLOAD_PREFIX}/recordings/req-multi/org-1.json",
-        f"{PAYLOAD_PREFIX}/recordings/req-multi/org-3.json",
-        f"{PAYLOAD_PREFIX}/surveys/req-multi/org-1.json",
-        f"{PAYLOAD_PREFIX}/surveys/req-multi/org-3.json",
+        f"{PAYLOAD_PREFIX}/recordings/org-1.json",
+        f"{PAYLOAD_PREFIX}/recordings/org-3.json",
+        f"{PAYLOAD_PREFIX}/surveys/org-1.json",
+        f"{PAYLOAD_PREFIX}/surveys/org-3.json",
     ]
     surveys = payload_by_org(result, "surveys")["org-3"]
     recordings = payload_by_org(result, "recordings")["org-3"]

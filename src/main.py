@@ -24,14 +24,15 @@ Ids sources:
   download left in the landing bucket for the event's `date`, grouped by their
   org_id= folder; those files are left untouched (conversations_details.py).
 
-Each organization's payload is written to the logs bucket under its tag, this
-invocation's execution id and its own organization id -- one flat file, no
-"organization" array, so a Step Function can read it straight into a Map
-state. The handler returns a list with one entry per (tag, organization) pair
-that got a file -- {execution_id, bucket, payload_location, organization_id,
-stages, failed_organizations, tag} -- never the payload itself, which could
-exceed the Step Functions 256 KB limit. The detailed run summary goes to the
-logs.
+Each organization's payload is written to the logs bucket under its tag and
+its own organization id -- one flat file, no "organization" array, at a fixed
+location Unitary Status/Download can always find: each run **overwrites**
+the previous payload for that (tag, organization) pair rather than keeping a
+copy per execution. The handler returns a list with one entry per
+(tag, organization) pair that got a file -- {bucket, payload_location,
+organization_id, stages, failed_organizations, tag} -- never the payload
+itself, which could exceed the Step Functions 256 KB limit. The detailed run
+summary (including the execution id) goes to the logs.
 
 An organization that can't be served (no `servers` entry, token failure) gets
 no file for this run. Every other organization's file lists it under
@@ -163,13 +164,13 @@ def _build_organizations(
 def _write_payloads(
     s3_client,
     settings: Settings,
-    execution_id: str,
     stages_by_tag: dict[str, dict[str, tuple[str, dict]]],
     organizations_by_tag: dict[str, list[dict]],
     failed: list[dict],
 ) -> list[dict]:
-    """Writes one flat file per (tag, organization) pair and returns, for each
-    one, only where it went -- never the payload itself."""
+    """Writes one flat file per (tag, organization) pair -- overwriting
+    whatever was there from a previous run -- and returns, for each one, only
+    where it went -- never the payload itself."""
     # Every organization's file carries the same list, in full detail (with
     # ids), so a re-run has whatever couldn't be served this time.
     failed_for_files = [
@@ -187,7 +188,7 @@ def _write_payloads(
         stages = list(stages_by_tag[tag])
         for entry in entries:
             organization_id = entry["organization_id"]
-            key = settings.payload_log_key(tag, execution_id, organization_id)
+            key = settings.payload_log_key(tag, organization_id)
             payload = build_organization_payload(tag, entry, failed_for_files)
             s3_utils.write_json(s3_client, settings.payload_log_bucket, key, payload)
             logger.info(
@@ -195,7 +196,6 @@ def _write_payloads(
             )
             responses.append(
                 {
-                    "execution_id": execution_id,
                     "bucket": settings.payload_log_bucket,
                     "payload_location": key,
                     "organization_id": organization_id,
@@ -250,9 +250,7 @@ def run(event, context) -> dict:
     organizations_by_tag, failed = _build_organizations(
         settings, stages_by_tag, base_path_keys, ids_by_organization
     )
-    responses = _write_payloads(
-        s3_client, settings, execution_id, stages_by_tag, organizations_by_tag, failed
-    )
+    responses = _write_payloads(s3_client, settings, stages_by_tag, organizations_by_tag, failed)
 
     result = {
         "execution_id": execution_id,

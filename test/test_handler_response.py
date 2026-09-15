@@ -19,15 +19,7 @@ ORGS = [
     {"organization_id": "org-3", "ids": ["conv-3"]},
     {"organization_id": "org-1", "ids": ["conv-1"]},
 ]
-RESPONSE_KEYS = [
-    "execution_id",
-    "bucket",
-    "payload_location",
-    "organization_id",
-    "stages",
-    "failed_organizations",
-    "tag",
-]
+RESPONSE_KEYS = ["bucket", "payload_location", "organization_id", "stages", "failed_organizations", "tag"]
 
 
 def _context(request_id: str = "req-1"):
@@ -68,9 +60,10 @@ def test_handler_always_returns_a_list_one_entry_per_tag_and_organization(aws):
     assert set(by_org) == {"org-1", "org-3"}
     assert list(by_org["org-1"]) == RESPONSE_KEYS
     assert by_org["org-1"] == {
-        "execution_id": "req-1",
         "bucket": LOGS_BUCKET,
-        "payload_location": f"{PREFIX}/surveys/req-1/org-1.json",
+        # A fixed key per (tag, organization) -- no execution id -- so a
+        # later run overwrites this same file rather than adding a new one.
+        "payload_location": f"{PREFIX}/surveys/org-1.json",
         "organization_id": "org-1",
         "stages": ["request_context"],
         "failed_organizations": [],
@@ -104,14 +97,13 @@ def test_tags_produce_a_response_entry_per_tag_and_organization(aws):
 
     locations = sorted(r["payload_location"] for r in responses)
     assert locations == [
-        f"{PREFIX}/recordings/req-2/org-1.json",
-        f"{PREFIX}/recordings/req-2/org-3.json",
-        f"{PREFIX}/surveys/req-2/org-1.json",
-        f"{PREFIX}/surveys/req-2/org-3.json",
+        f"{PREFIX}/recordings/org-1.json",
+        f"{PREFIX}/recordings/org-3.json",
+        f"{PREFIX}/surveys/org-1.json",
+        f"{PREFIX}/surveys/org-3.json",
     ]
     for response in responses:
         assert list(response) == RESPONSE_KEYS
-        assert response["execution_id"] == "req-2"
         assert _read(aws["s3"], response)["tag"] == response["tag"]
 
 
@@ -134,6 +126,18 @@ def test_failed_organizations_are_counts_in_the_response_and_ids_in_the_file(aws
     assert _read(aws["s3"], responses[0])["failed_organizations"] == [
         {"organization_id": "org-9", "ids": ["conv-9"], "error": "no servers entry for org_9"}
     ]
+
+
+def test_a_later_run_overwrites_the_same_organizations_file(aws):
+    first = handler(
+        {"tag": "surveys", "organizations": [{"organization_id": "org-1", "ids": ["conv-a"]}]}, _context()
+    )
+    second = handler(
+        {"tag": "surveys", "organizations": [{"organization_id": "org-1", "ids": ["conv-b"]}]}, _context()
+    )
+
+    assert first[0]["payload_location"] == second[0]["payload_location"] == f"{PREFIX}/surveys/org-1.json"
+    assert _read(aws["s3"], second[0])["ids"] == ["conv-b"]
 
 
 def test_a_wholly_failed_run_returns_an_empty_list(aws):

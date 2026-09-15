@@ -39,10 +39,12 @@ that got a payload file — even for these single-organization events.
 | `15-transcripts-inline` | transcripts for one conversation id sent in the event | token + payload | list of 1: `stages: ["request_context", "request_url"]` |
 | `06-surveys-contracts` | the hourly contracts process, then surveys | ⚠️ **writes parquet to refined and deletes the processed transcription files in providers-landing** | list with one entry per contract's organization; contract counts are in the `Run summary` log line |
 
-Every successful run writes one **flat** file per (tag, organization) pair to
-`s3://augusta-nexa-dev-logs/transacciones/genesys/api/payload_request_unitary/<tag>/<request id>/<organization_id>.json`
-(no `"organization"` array to unpack). Each response entry gives its `bucket`
-and `payload_location` (the key); open that object for the full payload, and
+Every successful run writes one **flat** file per (tag, organization) pair to a
+**fixed** location (no request id, no `"organization"` array to unpack):
+`s3://augusta-nexa-dev-logs/transacciones/genesys/api/payload_request_unitary/<tag>/<organization_id>.json`.
+Running the same event twice overwrites that file rather than adding a new
+one. Each response entry gives its `bucket` and `payload_location` (the key);
+open that object for the full payload, and
 the `Run summary` log line for the per-organization counts.
 
 ### Before running

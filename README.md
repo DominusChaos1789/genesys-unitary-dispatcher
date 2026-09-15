@@ -211,9 +211,8 @@ state limit):
 ```json
 [
   {
-    "execution_id": "<Lambda request id>",
     "bucket": "augusta-nexa-dev-logs",
-    "payload_location": "transacciones/genesys/api/payload_request_unitary/surveys/<execution_id>/org-1.json",
+    "payload_location": "transacciones/genesys/api/payload_request_unitary/surveys/org-1.json",
     "organization_id": "org-1",
     "stages": ["request_context"],
     "failed_organizations": [{"organization_id": "org-9", "id_count": 12, "error": "no servers entry for org_9"}],
@@ -223,20 +222,26 @@ state limit):
 ```
 
 - `payload_location` is the object key (prefix and file name) inside `bucket`.
+- **No execution id anywhere.** The key is fixed per (tag, organization), so
+  Status/Download always read the same, latest location, and each run
+  **overwrites** the previous payload for that pair — there's no history to
+  clean up. The Lambda request id still exists (`_context.aws_request_id`)
+  but only for the logged run summary, not the file path.
 - `failed_organizations` here gives an id **count**; the payload file (above)
   lists the actual ids.
-- The detailed run summary (ids per organization, the contracts or
-  conversations-download counts) is logged as `Run summary: {...}` in CloudWatch.
+- The detailed run summary (execution id, ids per organization, the contracts
+  or conversations-download counts) is logged as `Run summary: {...}` in
+  CloudWatch.
 
 ### Where it's written
 
-`s3://augusta-nexa-<env>-logs/transacciones/genesys/api/payload_request_unitary/<tag>/<execution_id>/<organization_id>.json`
+`s3://augusta-nexa-<env>-logs/transacciones/genesys/api/payload_request_unitary/<tag>/<organization_id>.json`
 
-The key includes the tag, the Lambda request id and the organization id
-because Status and Download read the payload back: with a key shared across
-organizations, two of them running close together would overwrite each
-other's file. Pass each response's `bucket` + `payload_location` to the next
-states instead of rebuilding the key.
+Fixed per (tag, organization) — not per execution — so Status/Download always
+know where to look without being told an execution id, and a run for the same
+tag and organization simply replaces the previous payload. Pass each
+response's `bucket` + `payload_location` to the next states instead of
+rebuilding the key.
 
 ### Failures
 
@@ -309,7 +314,7 @@ All optional.
 | `DISPATCHER_CONFIG_KEY` | `params/genesys/api/dispatcher.json` | The [flow allowlist/domain config](#dispatcherjson). |
 | `ENDPOINT_GROUPS` | `unitary,status` | Which `core.json` groups to load. Others (daily/ondemand/actions) are never read. |
 | `PAYLOAD_LOG_BUCKET` | `augusta-nexa-<env>-logs` | Logical or full name. |
-| `PAYLOAD_LOG_KEY_TEMPLATE` | `transacciones/genesys/api/payload_request_unitary/{tag}/{execution_id}/{organization_id}.json` | Must keep `{organization_id}` unique per organization, or two of them will overwrite each other's file. |
+| `PAYLOAD_LOG_KEY_TEMPLATE` | `transacciones/genesys/api/payload_request_unitary/{tag}/{organization_id}.json` | Fixed per (tag, organization) — no execution id — so each run overwrites the previous payload for that pair. Keep `{organization_id}` in any override, or different organizations will overwrite each other's file. |
 | `API_GENESYS_PARAMS` | `/augusta-nexa-<env>/genesys/api` | SSM path for `connection`/`servers`/`config`; OAuth secrets share the prefix. |
 | `REGION` | `us-east-2` | SSM / Secrets Manager region. |
 | `RESOURCE_NAME` | `augusta-nexa-<env>-genesys-api-unitary-request` | Name in the runtime-control log (token cache). |
