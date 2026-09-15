@@ -39,7 +39,7 @@ Current tags:
 | tag | stages | endpoints |
 |---|---|---|
 | `surveys` | `request_context` | `conversations_surveys` (GET, one call per conversation id, no polling) |
-| `transcripts` | `request_context` → `request_url` | `transcripts_search` (POST `/speechandtextanalytics/transcripts/search`), `transcripts_url` (GET `/speechandtextanalytics/conversations/{conversationId}/communications/{communicationId}/transcripturl` — `{communicationId}` only comes back from the search call, so it's left as a placeholder for Status/Download to fill once they have it) |
+| `transcripts` | `request_context` → `request_url` | `transcripts_search` (POST `/speechandtextanalytics/transcripts/search`, filtered by `divisionId` + a fixed `mediaType`/`language`, paginated with `pageSize`/`pageNumber`/`interval` — see [Payload](#payload)), `transcripts_url` (GET `/speechandtextanalytics/conversations/{conversationId}/communications/{communicationId}/transcripturl` — `{conversationId}`/`{communicationId}` only come back from the search call, so they're left as placeholders for Status/Download to fill once they have them) |
 | `funcionarios_adherencia` | `request_init` → `request_status` | `adherence_historical_init` (POST, one bulk job per management unit; no `userIds`, so it covers every user in the unit), `adherence_agent_status` |
 
 Adding a flow needs two things: tag its endpoints here (no code change, as
@@ -63,7 +63,7 @@ deploy:
   },
   "flows": {
     "surveys":                 {"enabled": true, "domain": "transacciones", "id_kind": "conversation"},
-    "transcripts":              {"enabled": true, "domain": "transacciones", "id_kind": "conversation"},
+    "transcripts":              {"enabled": true, "domain": "transacciones", "id_kind": "division"},
     "funcionarios_adherencia": {"enabled": true, "domain": "funcionarios",  "id_kind": "management_unit"}
   }
 }
@@ -74,7 +74,16 @@ deploy:
 - **`domain`** → **`output_base_path_key`** — which `config.output` key (SSM)
   this tag's downloads are saved under; see [Payload](#payload).
 - **`id_kind`** — `"tags": "all"` expands to every *enabled* flow whose
-  `id_kind` is `"conversation"`. Adherence's `"management_unit"` keeps it out.
+  `id_kind` is `"conversation"` or `"division"`. Both come from the same
+  conversations_details download, just a different field of the same records
+  (see [Ids from the Genesys conversations download](#ids-from-the-genesys-conversations-download));
+  adherence's `"management_unit"` keeps it out of `"all"` since it needs an
+  unrelated source. With `ids_source: "conversations_details"`, ids are
+  resolved once per distinct `id_kind` among the tags run — a `"conversation"`
+  tag and a `"division"` tag in the same run never share an ids list, even
+  though both come from that day's files. An organization with ids for one
+  kind but none for another (e.g. no transcript divisions that day) simply
+  gets no file for that tag — it's not a failure.
 
 This is config, not code: turning a flow on/off, moving it to a different
 domain, or adding a domain's output path is a `dispatcher.json` edit. Adding a
@@ -145,11 +154,14 @@ for these runs, so other flows don't load polars.
 A separate process downloads conversation details into
 `augusta-nexa-<env>-landing/transacciones/genesys/api/conversations_details/org_id=<N>/year=YYYY/month=MM/day=DD/`.
 The run reads that `date`'s files for every `org_id=` folder (`org_id=1` →
-`org-1`) and collects each file's `endpoint[].conversationId`. Nothing is
-transformed or written, and the files are never modified or deleted: they
-belong to the download process. Files that can't be read, or that have no
-`endpoint` list, are skipped and listed in `conversations_details.skipped_files`.
-`date` is required, as `YYYY-MM-DD`.
+`org-1`) and collects ids from each file's `endpoint[]` records — which field
+depends on the tag's `id_kind`: `"conversation"` tags (surveys) get
+`conversationId`, `"division"` tags (transcripts) get the same records'
+`divisionIds` instead, since transcripts' search endpoint filters by division
+rather than by conversation. Nothing is transformed or written, and the files
+are never modified or deleted: they belong to the download process. Files
+that can't be read, or that have no `endpoint` list, are skipped and listed
+in `conversations_details.skipped_files`. `date` is required, as `YYYY-MM-DD`.
 
 An unknown `ids_source` value fails the run before any file is touched.
 
@@ -183,8 +195,41 @@ unpack, so a Step Function can read one file straight into a Map state:
 
 - Only the organization-specific parts are rendered: `base_url` (region) and
   the `Authorization` header (token). Per-id placeholders — `{conversationId}`,
-  `{mu_id}`, `{jobId}`, `{communicationId}`, `{star_date}`, `{end_date}` — are
-  left for Status/Download to fill per call.
+  `{divisionId}`, `{mu_id}`, `{jobId}`, `{communicationId}`, `{star_date}`,
+  `{end_date}`, `{page_size}`, `{page_number}`, `{time_intervals}` — are left
+  for Status/Download to fill per call.
+
+transcripts' `request_context` (its `entry["ids"]` are divisionIds, per its
+`id_kind`):
+
+```json
+{
+  "base_url": "https://api.usw2.pure.cloud",
+  "url": "/api/v2/speechandtextanalytics/transcripts/search",
+  "method": "POST",
+  "payload": {
+    "pageSize": "{page_size}",
+    "pageNumber": "{page_number}",
+    "interval": "{time_intervals}",
+    "types": ["transcripts"],
+    "query": [
+      {"type": "EXACT", "fields": ["mediaType"], "value": "call"},
+      {"type": "EXACT", "fields": ["language"], "value": "es-us"},
+      {"type": "EXACT", "fields": ["divisionId"], "value": "{divisionId}"}
+    ],
+    "returnFields": ["conversationId", "communicationId"]
+  },
+  "type": "unitary", "path": "transcripts_search", "result_data": "state"
+}
+```
+
+`mediaType`/`language` are fixed in the endpoint definition; `{divisionId}`
+is filled per id from `entry["ids"]`, and `{page_size}`/`{page_number}`/
+`{time_intervals}` are filled by Status/Download's own pagination loop. The
+search's own result carries the `conversationId`/`communicationId` pairs that
+fill `transcripts_url`'s placeholders — a two-level relationship (one
+division search finds many conversations/communications) that's why
+`transcripts_url` isn't rendered from `entry["ids"]` at all.
 - Every stage of an organization uses **that organization's** token and region.
 - `method`, `type`, `path`, `result_data` and the body come from the endpoint
   definition, so `request_init` is `POST` as `adherence_historical_init` says.

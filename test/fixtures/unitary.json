@@ -41,14 +41,16 @@
         "method": "POST",
         "path": "transcripts_search",
         "body_templante": {
-            "conversationFilters": [
-                {
-                    "type": "and",
-                    "predicates": [
-                        {"type": "dimension", "dimension": "conversationId", "operator": "matches", "value": "{conversationId}"}
-                    ]
-                }
-            ]
+            "pageSize": "{page_size}",
+            "pageNumber": "{page_number}",
+            "interval": "{time_intervals}",
+            "types": ["transcripts"],
+            "query": [
+                {"type": "EXACT", "fields": ["mediaType"], "value": "call"},
+                {"type": "EXACT", "fields": ["language"], "value": "es-us"},
+                {"type": "EXACT", "fields": ["divisionId"], "value": "{divisionId}"}
+            ],
+            "returnFields": ["conversationId", "communicationId"]
         },
         "result_data": "state"
     },

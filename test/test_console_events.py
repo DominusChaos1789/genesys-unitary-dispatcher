@@ -28,7 +28,7 @@ SUCCEEDS = {
     "04-tags-list.json": {("surveys", "org-1"): 2},
     # "tags": "all" -- every enabled conversation-id flow in dispatcher.json,
     # today surveys and transcripts (adherence takes management-unit ids).
-    "05-tags-all.json": {("surveys", "org-1"): 2, ("transcripts", "org-1"): 2},
+    "05-tags-all.json": {("surveys", "org-1"): 2, ("transcripts", "org-1"): 1},
     "06-surveys-contracts.json": {("surveys", "org-3"): 2},
     "07-adherence-inline.json": {("funcionarios_adherencia", "org-1"): 1},
     "08-adherence-s3-file.json": {("funcionarios_adherencia", "org-1"): 1},

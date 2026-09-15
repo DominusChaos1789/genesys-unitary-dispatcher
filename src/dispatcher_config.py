@@ -3,8 +3,18 @@
 `<resources bucket>/params/genesys/api/dispatcher.json` declares, per tag,
 whether it's enabled, which output *domain* it belongs to (which SSM
 `config.output` key its downloads are saved under), and its `id_kind` (what
-kind of id feeds it -- "conversation", "management_unit", ...). `"tags":
-"all"` expands to every enabled flow whose `id_kind` is "conversation".
+kind of id feeds it):
+
+- "conversation": the ids are conversation ids themselves (surveys).
+- "division": the ids are the divisionIds recorded on those same
+  conversations, not the conversation ids (transcripts -- its search endpoint
+  filters by division, not by conversation).
+- "management_unit": a wholly different source (funcionarios_adherencia).
+
+Both "conversation" and "division" come from the same conversations_details
+download, just a different field of the same records, so `"tags": "all"`
+expands to every enabled flow of either kind. "management_unit" flows are
+never included -- they need `tags`/`tag` explicitly.
 
     {
       "version": 1,
@@ -14,7 +24,7 @@ kind of id feeds it -- "conversation", "management_unit", ...). `"tags":
       },
       "flows": {
         "surveys":                  {"enabled": true, "domain": "transacciones", "id_kind": "conversation"},
-        "transcripts":               {"enabled": true, "domain": "transacciones", "id_kind": "conversation"},
+        "transcripts":               {"enabled": true, "domain": "transacciones", "id_kind": "division"},
         "funcionarios_adherencia":  {"enabled": true, "domain": "funcionarios",  "id_kind": "management_unit"}
       }
     }
@@ -22,9 +32,10 @@ kind of id feeds it -- "conversation", "management_unit", ...). `"tags":
 This is config, not code: turning a flow on or off, moving it to a different
 output domain, or adding a new domain's output path is an edit to this one S3
 file, not a deploy. Adding a genuinely new *kind* of flow (a new stage type,
-like the `request_url` stage transcripts introduced) still needs a code
-change in endpoints.py/payload.py -- dispatcher.json only configures flows
-built from stage types the code already understands.
+like the `request_url` stage transcripts introduced, or a new `id_kind`) still
+needs a code change in endpoints.py/payload.py/conversations_details.py --
+dispatcher.json only configures flows built from kinds the code already
+understands.
 
 Endpoint definitions (unitary.json/status.json) stay the single source of
 truth for the actual URLs/methods/bodies; dispatcher.json never duplicates
@@ -35,6 +46,8 @@ import src.s3_utils as s3_utils
 from src.config import Settings
 
 CONVERSATION_ID_KIND = "conversation"
+DIVISION_ID_KIND = "division"
+CONVERSATION_DETAILS_ID_KINDS = (CONVERSATION_ID_KIND, DIVISION_ID_KIND)
 
 
 class DispatcherConfigError(ValueError):
@@ -85,12 +98,18 @@ def output_base_path_key(config: dict, tag: str) -> str:
     return config["domains"][flow["domain"]]["output_base_path_key"]
 
 
+def flow_id_kind(config: dict, tag: str) -> str:
+    """The tag's id_kind, defaulting to "conversation" for flows that predate
+    this field."""
+    return flow_config(config, tag).get("id_kind", CONVERSATION_ID_KIND)
+
+
 def conversation_tags(config: dict) -> list[str]:
-    """Every enabled flow whose id_kind is "conversation" -- what `"tags":
-    "all"` expands to. Flows keyed by other ids (e.g. adherence's management
-    units) are never included."""
+    """Every enabled flow whose id_kind is "conversation" or "division" --
+    what `"tags": "all"` expands to. Flows keyed by other ids (e.g.
+    adherence's management units) are never included."""
     return sorted(
         tag
         for tag, flow in config["flows"].items()
-        if flow.get("enabled") and flow.get("id_kind") == CONVERSATION_ID_KIND
+        if flow.get("enabled") and flow.get("id_kind") in CONVERSATION_DETAILS_ID_KINDS
     )

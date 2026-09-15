@@ -167,10 +167,10 @@ steps 1-2, both S3 edits.
 
 | | |
 |---|---|
-| Ids | Genesys conversation ids, grouped by organization |
-| Stages | `request_context`: `POST /api/v2/speechandtextanalytics/transcripts/search` → `request_url`: `GET .../conversations/{conversationId}/communications/{communicationId}/transcripturl` |
+| Ids | divisionIds (`id_kind: "division"`), read off the same conversation records surveys reads for its conversation ids -- not conversation ids themselves, since the search endpoint filters by division |
+| Stages | `request_context`: `POST /api/v2/speechandtextanalytics/transcripts/search` (fixed `mediaType`/`language`, `{divisionId}` per id, `{page_size}`/`{page_number}`/`{time_intervals}` left for Download's pagination loop) → `request_url`: `GET .../conversations/{conversationId}/communications/{communicationId}/transcripturl` |
 | Saved under | `transacciones/genesys/api` |
-| Next | Download executes the search, reads the `communicationId` out of its result, fills it into `request_url`'s template (this Lambda leaves it as a placeholder, since it only comes from the search response), and fetches the transcript URL. |
+| Next | Download executes the search (once per divisionId, paginating), reads each `conversationId`/`communicationId` pair out of its `returnFields`, fills them into `request_url`'s template (this Lambda leaves both as placeholders, since they only come from the search response), and fetches each transcript URL. |
 
 ### Contracts process: where surveys ids come from
 

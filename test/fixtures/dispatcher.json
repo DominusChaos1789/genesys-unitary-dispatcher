@@ -6,7 +6,7 @@
     },
     "flows": {
         "surveys": {"enabled": true, "domain": "transacciones", "id_kind": "conversation"},
-        "transcripts": {"enabled": true, "domain": "transacciones", "id_kind": "conversation"},
+        "transcripts": {"enabled": true, "domain": "transacciones", "id_kind": "division"},
         "funcionarios_adherencia": {"enabled": true, "domain": "funcionarios", "id_kind": "management_unit"}
     }
 }

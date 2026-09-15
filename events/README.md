@@ -32,11 +32,11 @@ that got a payload file — even for these single-organization events.
 | `02-surveys-inline` | surveys for one conversation id sent in the event | reads SSM/Secrets, gets org-1's token, writes the payload | list of 1: `org-1`'s file has 1 id |
 | `03-surveys-conv-details` | surveys for every conversation downloaded on 2026-08-13 | reads the landing files (never deletes them) | list with one entry per `org_id=` folder with files that day |
 | `04-tags-list` | same, with `tags` as a list | same as 03 | same as 03 (still one flow, `surveys`) |
-| `05-tags-all` | every enabled conversation flow (dispatcher.json) for 2026-08-13 | same as 03, one file per (flow, organization) | list with one entry per flow × organization (today `surveys` and `transcripts`) |
+| `05-tags-all` | every enabled `conversation`/`division` flow (dispatcher.json) for 2026-08-13 | same as 03, one file per (flow, organization); `transcripts` reads divisionIds off the same day's files, not conversation ids | list with one entry per flow × organization (today `surveys` and `transcripts`) |
 | `07-adherence-inline` | adherence for one management unit sent in the event | token + payload | list of 1: `stages: ["request_init", "request_status"]` |
 | `08-adherence-s3-file` | adherence for the units listed in an S3 file | reads the file | same as 07 |
 | `09-eventbridge-s3` | the S3 "Object Created" event EventBridge would send for that file | reads the file | same as 07 |
-| `15-transcripts-inline` | transcripts for one conversation id sent in the event | token + payload | list of 1: `stages: ["request_context", "request_url"]` |
+| `15-transcripts-inline` | transcripts for one divisionId sent in the event | token + payload | list of 1: `stages: ["request_context", "request_url"]` |
 | `06-surveys-contracts` | the hourly contracts process, then surveys | ⚠️ **writes parquet to refined and deletes the processed transcription files in providers-landing** | list with one entry per contract's organization; contract counts are in the `Run summary` log line |
 
 Every successful run writes one **flat** file per (tag, organization) pair to a
@@ -57,7 +57,9 @@ the `Run summary` log line for the per-organization counts.
   A full day is dozens of files per organization; if the run times out, raise the
   function timeout (dev is 60 s) before reading anything into the result.
 - **`07`**: replace `REPLACE_WITH_MU_ID` with a real management unit id.
-- **`15`**: `00000000-0000-4000-8000-000000000001` is a placeholder, same as `02`.
+- **`15`**: `00000000-0000-4000-8000-000000000001` is a placeholder standing in
+  for a divisionId (transcripts' `id_kind` is `"division"`, not
+  `"conversation"` like `02`'s).
 - **`08`, `09`**: upload the units file first (edit its id too). The key is an
   example; use wherever the 2 a.m. process actually writes it:
 

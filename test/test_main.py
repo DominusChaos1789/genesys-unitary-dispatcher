@@ -300,10 +300,10 @@ def test_all_tags_without_any_conversation_flow_is_an_error(aws):
 
     config = json.loads(s3.get_object(Bucket=RESOURCES_BUCKET, Key=DISPATCHER_CONFIG_KEY)["Body"].read())
     for flow in config["flows"].values():
-        flow["enabled"] = flow.get("id_kind") != "conversation"
+        flow["enabled"] = flow.get("id_kind") not in ("conversation", "division")
     s3.put_object(Bucket=RESOURCES_BUCKET, Key=DISPATCHER_CONFIG_KEY, Body=json.dumps(config))
 
-    with pytest.raises(EventError, match='found no enabled flow with id_kind "conversation"'):
+    with pytest.raises(EventError, match='found no enabled flow with id_kind "conversation" or "division"'):
         run({"tags": "all", "organizations": TWO_ORGS}, _context())
 
 

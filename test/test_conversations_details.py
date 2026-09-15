@@ -98,6 +98,50 @@ def test_conversations_without_an_id_are_ignored(aws):
     assert _by_org(result)["org-2"]["ids"] == ["a"]
 
 
+def test_transcripts_reads_division_ids_off_the_same_conversation_records(aws):
+    _put(
+        aws["s3"],
+        f"{PREFIX}org_id=3/{DAY_PATH}sample.json",
+        load_fixture("conversations_details_sample.json"),
+    )
+    sample_division_ids = sorted(
+        division_id
+        for c in load_fixture("conversations_details_sample.json")["endpoint"]
+        for division_id in c.get("divisionIds", [])
+    )
+
+    result = run({"tag": "transcripts", "ids_source": "conversations_details", "date": DAY}, _context())
+
+    assert _by_org(result)["org-3"]["ids"] == sample_division_ids
+    assert result["conversations_details"]["conversations"] == {"org-3": len(sample_division_ids)}
+
+
+def test_unreadable_division_files_are_skipped_and_reported(aws):
+    s3 = aws["s3"]
+    no_endpoint = f"{PREFIX}org_id=1/{DAY_PATH}no_endpoint.json"
+    _put(
+        s3,
+        f"{PREFIX}org_id=1/{DAY_PATH}good.json",
+        {"endpoint": [{"conversationId": "a", "divisionIds": ["d"]}]},
+    )
+    _put(s3, no_endpoint, {"conversations": [{"conversationId": "x"}]})
+
+    result = run({"tag": "transcripts", "ids_source": "conversations_details", "date": DAY}, _context())
+
+    assert _by_org(result)["org-1"]["ids"] == ["d"]
+    assert result["conversations_details"]["skipped_files"] == [no_endpoint]
+
+
+def test_a_tags_all_run_skips_transcripts_for_an_organization_with_no_division_ids(aws):
+    _put(aws["s3"], f"{PREFIX}org_id=1/{DAY_PATH}a.json", _details("a"))
+
+    result = run({"tags": "all", "ids_source": "conversations_details", "date": DAY}, _context())
+
+    tags_present = {r["tag"] for r in result["responses"]}
+    assert tags_present == {"surveys"}
+    assert result["failed_organizations"] == []
+
+
 def test_folders_that_are_not_org_partitions_are_ignored(aws):
     s3 = aws["s3"]
     _put(s3, f"{PREFIX}org_id=1/{DAY_PATH}a.json", _details("a"))

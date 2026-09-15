@@ -11,18 +11,24 @@ every stage of that flow (payload.py):
     transcripts              -> request_context, request_url
     funcionarios_adherencia  -> request_init, request_status (one job per management unit)
 
-`"tags": [...]` runs several flows over the same ids, and `"tags": "all"` runs
-every enabled flow whose dispatcher.json id_kind is "conversation". The ids
-are read once and each organization's token is requested once, however many
-tags run.
+`"tags": [...]` runs several flows over their own ids, and `"tags": "all"` runs
+every enabled flow whose dispatcher.json id_kind is "conversation" or
+"division" (dispatcher_config.py). Ids are resolved once per distinct id_kind
+among the tags requested -- not once overall -- since a "division" tag like
+transcripts needs different ids from a "conversation" tag like surveys even
+in the same run; each organization's token is still requested once however
+many tags/kinds run.
 
 Ids sources:
-- none: the ids come in the event, inline or as an S3 file (sources.py).
+- none: the ids come in the event, inline or as an S3 file (sources.py);
+  the same event ids are used for whatever id_kind(s) the requested tags need.
 - "contracts": the contracts process -- transcription files to parquet,
   conversation ids grouped by each contract's organization (contracts_process.py).
-- "conversations_details": the conversation ids the Genesys conversations
-  download left in the landing bucket for the event's `date`, grouped by their
-  org_id= folder; those files are left untouched (conversations_details.py).
+- "conversations_details": ids the Genesys conversations download left in the
+  landing bucket for the event's `date`, grouped by their org_id= folder --
+  either the conversation ids themselves, or the divisionIds recorded on those
+  same conversations, depending on the tag's id_kind (conversations_details.py).
+  Those files are left untouched.
 
 Each organization's payload is written to the logs bucket under its tag and
 its own organization id -- one flat file, no "organization" array, at a fixed
@@ -47,8 +53,15 @@ import boto3
 
 import src.s3_utils as s3_utils
 from src.config import Settings, load_settings
-from src.conversations_details import collect_conversation_ids, parse_date
-from src.dispatcher_config import conversation_tags, flow_config, load_dispatcher_config, output_base_path_key
+from src.conversations_details import collect_conversation_ids, collect_division_ids, parse_date
+from src.dispatcher_config import (
+    DIVISION_ID_KIND,
+    conversation_tags,
+    flow_config,
+    flow_id_kind,
+    load_dispatcher_config,
+    output_base_path_key,
+)
 from src.endpoints import load_endpoint_catalog, select_stages
 from src.payload import build_organization_entry, build_organization_payload, output_base_path
 from src.sources import ALL_TAGS, EventError, resolve_ids_by_organization, resolve_tag_selection
@@ -72,16 +85,17 @@ def _expand_tags(selection: list[str] | str, dispatcher: dict) -> list[str]:
         return selection
     tags = conversation_tags(dispatcher)
     if not tags:
-        raise EventError('"tags": "all" found no enabled flow with id_kind "conversation"')
+        raise EventError('"tags": "all" found no enabled flow with id_kind "conversation" or "division"')
     return tags
 
 
-def _resolve_ids(s3_client, settings: Settings, event: dict, execution_id: str):
+def _resolve_ids(s3_client, settings: Settings, event: dict, execution_id: str, id_kind: str):
     """(ids by organization, source summary or None).
 
-    Without `ids_source` the ids come from the event itself. With one, they come
-    from that process, and its summary goes into the logged run summary.
-    The contracts process is imported here, not at module level: it's the only
+    Without `ids_source` the ids come from the event itself, whatever they
+    are for the tags requested. With one, they come from that process for the
+    given `id_kind`, and its summary goes into the logged run summary. The
+    contracts process is imported here, not at module level: it's the only
     path that needs polars, so the other flows never load it.
     """
     ids_source = event.get("ids_source")
@@ -93,26 +107,55 @@ def _resolve_ids(s3_client, settings: Settings, event: dict, execution_id: str):
 
         outcome = run_contracts(s3_client, settings, execution_id)
     elif ids_source == CONVERSATIONS_DETAILS_IDS_SOURCE:
-        outcome = collect_conversation_ids(s3_client, settings, parse_date(event.get("date")))
+        day = parse_date(event.get("date"))
+        if id_kind == DIVISION_ID_KIND:
+            outcome = collect_division_ids(s3_client, settings, day)
+        else:
+            outcome = collect_conversation_ids(s3_client, settings, day)
     else:
         raise EventError(f"Unknown ids_source {ids_source!r}; expected one of {sorted(IDS_SOURCES)}")
     return outcome["ids_by_organization"], outcome["summary"]
+
+
+def _resolve_ids_by_kind(s3_client, settings: Settings, event: dict, execution_id: str, id_kinds: set[str]):
+    """({id_kind: ids by organization}, {id_kind: source summary}).
+
+    Ids are resolved once per distinct id_kind among the tags requested (e.g.
+    "tags": "all" mixes "conversation" tags like surveys with "division" tags
+    like transcripts, which need different ids from the same conversations_details
+    day). Without `ids_source`, the event supplies one set of ids that's used
+    for every kind -- the event author is responsible for sending ids that fit
+    whatever tag(s) they asked for.
+    """
+    ids_by_kind: dict[str, dict[str, list[str]]] = {}
+    summaries_by_kind: dict[str, dict] = {}
+    for id_kind in sorted(id_kinds):
+        ids_by_organization, summary = _resolve_ids(s3_client, settings, event, execution_id, id_kind)
+        ids_by_kind[id_kind] = ids_by_organization
+        if summary is not None:
+            summaries_by_kind[id_kind] = summary
+    return ids_by_kind, summaries_by_kind
 
 
 def _build_organizations(
     settings: Settings,
     stages_by_tag: dict[str, dict[str, tuple[str, dict]]],
     base_path_keys: dict[str, str],
-    ids_by_organization: dict[str, list[str]],
+    id_kinds_by_tag: dict[str, str],
+    ids_by_kind: dict[str, dict[str, list[str]]],
 ) -> tuple[dict[str, list[dict]], list[dict]]:
     """({tag: organization entries}, failed organizations).
 
-    One token per organization for all tags. An organization's entries for every
-    tag are built before any is kept, so it is either in every tag's files or
-    failed entirely (never present for one tag and missing for another).
+    One token per organization for all tags, but each tag draws its ids from
+    its own id_kind -- a "division" tag like transcripts and a "conversation"
+    tag like surveys never share an ids list. An organization with a token
+    failure is failed for every tag; one with no ids for a given tag's kind
+    (e.g. no transcript divisions that day) simply gets no file for that tag,
+    not a failure.
     """
     organizations: dict[str, list[dict]] = {tag: [] for tag in stages_by_tag}
-    if not ids_by_organization:
+    all_organization_ids = sorted({org for ids in ids_by_kind.values() for org in ids})
+    if not all_organization_ids:
         return organizations, []
 
     config = load_config(settings.api_genesys_params, region_name=settings.region)
@@ -126,33 +169,37 @@ def _build_organizations(
     connection = config["connection"]
     failed: list[dict] = []
 
-    for organization_id, ids in sorted(ids_by_organization.items()):
+    for organization_id in all_organization_ids:
         server = config["servers"].get(_server_key(organization_id))
+        # Every id this organization has, across kinds, only to report a failure.
+        organization_ids = sorted({i for ids in ids_by_kind.values() for i in ids.get(organization_id, [])})
         if server is None:
             logger.error("No 'servers' entry for organization %s", organization_id)
             error = f"no servers entry for {_server_key(organization_id)}"
-            failed.append({"organization_id": organization_id, "ids": ids, "error": error})
+            failed.append({"organization_id": organization_id, "ids": organization_ids, "error": error})
             continue
 
         try:
             token = get_token(
                 config["secret"], connection, token_base_path, server, resource_name=settings.resource_name
             )
-            entries = {
-                tag: build_organization_entry(
+            entries = {}
+            for tag, stages in stages_by_tag.items():
+                tag_ids = ids_by_kind.get(id_kinds_by_tag[tag], {}).get(organization_id, [])
+                if not tag_ids:
+                    continue
+                entries[tag] = build_organization_entry(
                     organization_id,
-                    ids,
+                    tag_ids,
                     stages,
                     token=token,
                     connection=connection,
                     server=server,
                     base_path=base_paths[tag],
                 )
-                for tag, stages in stages_by_tag.items()
-            }
         except Exception as exc:  # noqa: BLE001 -- one organization must not stop the rest
             logger.exception("Could not build the payload for organization %s", organization_id)
-            failed.append({"organization_id": organization_id, "ids": ids, "error": str(exc)})
+            failed.append({"organization_id": organization_id, "ids": organization_ids, "error": str(exc)})
             continue
 
         for tag, entry in entries.items():
@@ -239,16 +286,20 @@ def run(event, context) -> dict:
     # process deletes source files once it's done).
     stages_by_tag: dict[str, dict[str, tuple[str, dict]]] = {}
     base_path_keys: dict[str, str] = {}
+    id_kinds_by_tag: dict[str, str] = {}
     for tag in tags:
         flow_config(dispatcher, tag)
         base_path_keys[tag] = output_base_path_key(dispatcher, tag)
         stages_by_tag[tag] = select_stages(catalog, tag)
+        id_kinds_by_tag[tag] = flow_id_kind(dispatcher, tag)
 
-    ids_by_organization, source_summary = _resolve_ids(s3_client, settings, event, execution_id)
-    logger.info("Tags %s, %d organization(s)", tags, len(ids_by_organization))
+    ids_by_kind, summaries_by_kind = _resolve_ids_by_kind(
+        s3_client, settings, event, execution_id, set(id_kinds_by_tag.values())
+    )
+    logger.info("Tags %s, ids: %s", tags, {kind: len(ids) for kind, ids in ids_by_kind.items()})
 
     organizations_by_tag, failed = _build_organizations(
-        settings, stages_by_tag, base_path_keys, ids_by_organization
+        settings, stages_by_tag, base_path_keys, id_kinds_by_tag, ids_by_kind
     )
     responses = _write_payloads(s3_client, settings, stages_by_tag, organizations_by_tag, failed)
 
@@ -261,6 +312,11 @@ def run(event, context) -> dict:
             for f in failed
         ],
     }
-    if source_summary is not None:
-        result[event["ids_source"]] = source_summary
+    if summaries_by_kind:
+        # The common case is one id_kind: keep the summary flat under the
+        # ids_source name, as before. Only nest it by kind when a run (e.g.
+        # "tags": "all") actually mixed more than one.
+        result[event["ids_source"]] = (
+            next(iter(summaries_by_kind.values())) if len(summaries_by_kind) == 1 else summaries_by_kind
+        )
     return result
