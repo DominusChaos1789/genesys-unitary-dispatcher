@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.main import handler
+from src.main import run
 from src.sources import EventError
 from test.conftest import (
     CORE_CONFIG,
@@ -53,13 +53,15 @@ def _add_recordings_flow(s3) -> None:
 
 
 def test_surveys_payload_has_one_direct_stage_per_organization(aws, genesys_api):
-    result = handler({"tag": "surveys", "organizations": TWO_ORGS}, _context())
+    result = run({"tag": "surveys", "organizations": TWO_ORGS}, _context())
 
     assert result["tags"] == ["surveys"]
     assert result["failed_organizations"] == []
     assert result["payloads"] == [
         {
             "tag": "surveys",
+            "bucket": LOGS_BUCKET,
+            "key": f"{PAYLOAD_PREFIX}/surveys/req-123.json",
             "payload_location": f"s3://{LOGS_BUCKET}/{PAYLOAD_PREFIX}/surveys/req-123.json",
             "stages": ["request_context"],
             "organizations": {"org-1": 1, "org-3": 2},
@@ -93,9 +95,7 @@ def test_the_response_carries_locations_and_counts_never_the_payload(aws):
     than that, so the ids only live in the payload file."""
     ids = [f"conversation-{n:05d}-0000-4000-8000-000000000000" for n in range(6000)]
 
-    result = handler(
-        {"tag": "surveys", "organizations": [{"organization_id": "org-1", "ids": ids}]}, _context()
-    )
+    result = run({"tag": "surveys", "organizations": [{"organization_id": "org-1", "ids": ids}]}, _context())
 
     assert "organization" not in result
     assert len(json.dumps(result)) < 2_000
@@ -112,7 +112,7 @@ def test_adherence_is_one_job_per_management_unit(aws):
         Body=json.dumps({"organizations": [{"organization_id": "org-1", "ids": ["mu-2", "mu-1"]}]}),
     )
 
-    result = handler(
+    result = run(
         {"tag": "funcionarios_adherencia", "ids_location": {"bucket": "landing", "key": key}},
         _context(),
     )
@@ -151,7 +151,7 @@ def test_every_stage_uses_its_own_organizations_token_and_region(aws):
         ],
     }
 
-    result = handler(event, _context())
+    result = run(event, _context())
 
     expected = {"org-1": ("sae1", "org-1", "org_id=1/"), "org-3": ("usw2", "org-3", "org_id=3/")}
     for organization_id, entry in payload_by_org(result).items():
@@ -172,7 +172,7 @@ def test_one_token_per_organization_not_per_stage(aws, genesys_api):
         ],
     }
 
-    handler(event, _context())
+    run(event, _context())
 
     assert genesys_api["requested_orgs"] == ["org-1", "org-3"]
 
@@ -180,7 +180,7 @@ def test_one_token_per_organization_not_per_stage(aws, genesys_api):
 def test_payload_file_is_written_under_its_tag_and_execution_id(aws):
     event = {"tag": "surveys", "organizations": [{"organization_id": "org-1", "ids": ["conv-1"]}]}
 
-    result = handler(event, _context("req-abc"))
+    result = run(event, _context("req-abc"))
 
     key = f"{PAYLOAD_PREFIX}/surveys/req-abc.json"
     assert result["payloads"][0]["payload_location"] == f"s3://{LOGS_BUCKET}/{key}"
@@ -194,8 +194,8 @@ def test_payloads_for_different_tags_do_not_overwrite_each_other(aws):
     s3 = aws["s3"]
     organizations = [{"organization_id": "org-1", "ids": ["x"]}]
 
-    handler({"tag": "surveys", "organizations": organizations}, _context("same-id"))
-    handler({"tag": "funcionarios_adherencia", "organizations": organizations}, _context("same-id"))
+    run({"tag": "surveys", "organizations": organizations}, _context("same-id"))
+    run({"tag": "funcionarios_adherencia", "organizations": organizations}, _context("same-id"))
 
     surveys = s3.get_object(Bucket=LOGS_BUCKET, Key=f"{PAYLOAD_PREFIX}/surveys/same-id.json")
     adherence = s3.get_object(
@@ -208,7 +208,7 @@ def test_payloads_for_different_tags_do_not_overwrite_each_other(aws):
 def test_several_tags_share_the_ids_and_one_token_per_organization(aws, genesys_api):
     _add_recordings_flow(aws["s3"])
 
-    result = handler({"tags": ["surveys", "recordings"], "organizations": TWO_ORGS}, _context("req-multi"))
+    result = run({"tags": ["surveys", "recordings"], "organizations": TWO_ORGS}, _context("req-multi"))
 
     assert result["tags"] == ["surveys", "recordings"]
     assert [p["payload_location"] for p in result["payloads"]] == [
@@ -231,7 +231,7 @@ def test_each_tag_saves_under_its_own_domain_prefix_in_the_same_run(aws):
         "organizations": [{"organization_id": "org-1", "ids": ["x"]}],
     }
 
-    result = handler(event, _context())
+    result = run(event, _context())
 
     assert payload_by_org(result, "surveys")["org-1"]["request_context"]["base_path"] == GENESYS_BASE_PATH
     adherence = payload_by_org(result, "funcionarios_adherencia")["org-1"]
@@ -241,7 +241,7 @@ def test_each_tag_saves_under_its_own_domain_prefix_in_the_same_run(aws):
 def test_all_tags_runs_every_conversation_flow_and_nothing_else(aws):
     _add_recordings_flow(aws["s3"])
 
-    result = handler({"tags": "all", "organizations": TWO_ORGS}, _context())
+    result = run({"tags": "all", "organizations": TWO_ORGS}, _context())
 
     # funcionarios_adherencia takes {mu_id}, not conversation ids, so it isn't included.
     assert result["tags"] == ["recordings", "surveys"]
@@ -254,7 +254,7 @@ def test_all_tags_without_any_conversation_flow_is_an_error(aws):
     )
 
     with pytest.raises(EventError, match="found no endpoints taking"):
-        handler({"tags": "all", "organizations": TWO_ORGS}, _context())
+        run({"tags": "all", "organizations": TWO_ORGS}, _context())
 
 
 def test_every_tag_is_validated_before_any_ids_are_read(aws):
@@ -262,11 +262,11 @@ def test_every_tag_is_validated_before_any_ids_are_read(aws):
     event = {"tags": ["surveys", "nope"], "ids_location": {"bucket": "landing", "key": "does/not/exist.json"}}
 
     with pytest.raises(ValueError, match="No endpoints are tagged 'nope'"):
-        handler(event, _context())
+        run(event, _context())
 
 
 def test_execution_id_falls_back_to_a_uuid_without_a_lambda_context(aws):
-    result = handler({"tag": "surveys", "organizations": []}, None)
+    result = run({"tag": "surveys", "organizations": []}, None)
 
     assert re.fullmatch(r"[0-9a-f-]{36}", result["execution_id"])
     assert result["payloads"][0]["payload_location"].endswith(f"/surveys/{result['execution_id']}.json")
@@ -285,7 +285,7 @@ def test_s3_object_created_event_through_eventbridge(aws):
         "detail": {"tag": "surveys", "bucket": {"name": LANDING_BUCKET}, "object": {"key": key}},
     }
 
-    result = handler(event, _context())
+    result = run(event, _context())
 
     assert payload_by_org(result)["org-3"]["ids"] == ["conv-a", "conv-b"]
 
@@ -299,7 +299,7 @@ def test_an_organization_without_a_servers_entry_is_reported_not_fatal(aws, gene
         ],
     }
 
-    result = handler(event, _context())
+    result = run(event, _context())
 
     assert list(payload_by_org(result)) == ["org-1"]
     assert result["failed_organizations"] == [
@@ -321,7 +321,7 @@ def test_an_organization_that_fails_is_left_out_of_every_payload(aws, monkeypatc
 
     monkeypatch.setattr("src.main.get_token", flaky_get_token)
 
-    result = handler({"tags": ["surveys", "recordings"], "organizations": TWO_ORGS}, _context())
+    result = run({"tags": ["surveys", "recordings"], "organizations": TWO_ORGS}, _context())
 
     assert result["failed_organizations"] == [
         {"organization_id": "org-1", "id_count": 1, "error": "oauth down for org-1"}
@@ -336,7 +336,7 @@ def test_an_organization_that_fails_is_left_out_of_every_payload(aws, monkeypatc
 
 
 def test_no_ids_writes_empty_payloads_without_touching_genesys(aws, genesys_api):
-    result = handler({"tag": "surveys", "organizations": []}, _context("req-empty"))
+    result = run({"tag": "surveys", "organizations": []}, _context("req-empty"))
 
     assert result["payloads"][0]["organizations"] == {}
     assert read_payload(result) == {"tag": "surveys", "organization": [], "failed_organizations": []}
@@ -347,7 +347,7 @@ def test_unknown_tag_fails_before_reading_any_ids(aws):
     event = {"tag": "nope", "ids_location": {"bucket": "landing", "key": "does/not/exist.json"}}
 
     with pytest.raises(ValueError, match="No endpoints are tagged 'nope'"):
-        handler(event, _context())
+        run(event, _context())
 
 
 def test_funcionarios_flows_are_saved_under_base_path_wfm(aws):
@@ -356,7 +356,7 @@ def test_funcionarios_flows_are_saved_under_base_path_wfm(aws):
         "organizations": [{"organization_id": "org-1", "ids": ["mu-1"]}],
     }
 
-    result = handler(event, _context())
+    result = run(event, _context())
 
     entry = payload_by_org(result)["org-1"]
     for stage_key in result["payloads"][0]["stages"]:
@@ -368,7 +368,7 @@ def test_the_token_cache_key_stays_on_base_path_for_every_flow(aws, genesys_api)
     funcionarios flows would miss the cached token and mint a second one."""
     organizations = [{"organization_id": "org-1", "ids": ["x"]}]
 
-    handler({"tag": "funcionarios_adherencia", "organizations": organizations}, _context("a"))
-    handler({"tag": "surveys", "organizations": organizations}, _context("b"))
+    run({"tag": "funcionarios_adherencia", "organizations": organizations}, _context("a"))
+    run({"tag": "surveys", "organizations": organizations}, _context("b"))
 
     assert genesys_api["token_base_paths"] == [GENESYS_BASE_PATH, GENESYS_BASE_PATH]

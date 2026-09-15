@@ -24,20 +24,21 @@ touch nothing, and `06` deletes files.
 
 | Event | What it does | Side effects | Expected response |
 |---|---|---|---|
-| `01-smoke-empty` | surveys with no ids | writes an empty payload to logs; **no Genesys or SSM calls** | `payloads[0].organizations` is `{}` |
+| `01-smoke-empty` | surveys with no ids | writes an empty payload to logs; **no Genesys or SSM calls** | one object; the payload file has an empty `organization` list |
 | `10`–`14` `err-*` | invalid events (see below) | none | the run fails with the error below |
-| `02-surveys-inline` | surveys for one conversation id sent in the event | reads SSM/Secrets, gets org-1's token, writes the payload | `organizations: {"org-1": 1}` |
-| `03-surveys-conv-details` | surveys for every conversation downloaded on 2026-08-13 | reads the landing files (never deletes them) | one count per `org_id=` folder with files that day |
-| `04-tags-list` | same, with `tags` as a list | same as 03 | `tags: ["surveys"]` |
-| `05-tags-all` | every conversation flow for 2026-08-13 | same as 03, one payload per flow | `tags` lists every conversation flow (today only `surveys`) |
-| `07-adherence-inline` | adherence for one management unit sent in the event | token + payload | `organizations: {"org-1": 1}`, `stages: ["request_init", "request_status"]` |
+| `02-surveys-inline` | surveys for one conversation id sent in the event | reads SSM/Secrets, gets org-1's token, writes the payload | one object; the payload file has org-1 with 1 id |
+| `03-surveys-conv-details` | surveys for every conversation downloaded on 2026-08-13 | reads the landing files (never deletes them) | one object; the payload file has one entry per `org_id=` folder with files that day |
+| `04-tags-list` | same, with `tags` as a list | same as 03 | a **list** with one object per tag |
+| `05-tags-all` | every conversation flow for 2026-08-13 | same as 03, one payload per flow | a **list**, one object per conversation flow (today only `surveys`) |
+| `07-adherence-inline` | adherence for one management unit sent in the event | token + payload | one object with `stages: ["request_init", "request_status"]` |
 | `08-adherence-s3-file` | adherence for the units listed in an S3 file | reads the file | same as 07 |
 | `09-eventbridge-s3` | the S3 "Object Created" event EventBridge would send for that file | reads the file | same as 07 |
-| `06-surveys-contracts` | the hourly contracts process, then surveys | ⚠️ **writes parquet to refined and deletes the processed transcription files in providers-landing** | `contracts.contracts_processed`, one count per contract organization |
+| `06-surveys-contracts` | the hourly contracts process, then surveys | ⚠️ **writes parquet to refined and deletes the processed transcription files in providers-landing** | one object; contract counts are in the `Run summary` log line |
 
 Every successful run writes one file per tag to
-`s3://augusta-nexa-dev-logs/transacciones/genesys/api/payload_request_unitary/<tag>/<request id>.json`;
-open the `payload_location` from the response to see the full payload.
+`s3://augusta-nexa-dev-logs/transacciones/genesys/api/payload_request_unitary/<tag>/<request id>.json`.
+The response gives its `bucket` and `payload_location` (the key); open that object for the full
+payload, and the `Run summary` log line for the per-organization counts.
 
 ### Before running
 

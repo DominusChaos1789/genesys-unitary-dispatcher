@@ -5,7 +5,7 @@ import pytest
 
 import src.s3_utils as s3_utils
 from src.conversations_details import organization_id_from_folder, parse_date
-from src.main import handler
+from src.main import run
 from src.sources import EventError
 from test.conftest import LANDING_BUCKET, load_fixture, payload_by_org, read_payload
 
@@ -50,7 +50,7 @@ def test_ids_are_read_per_organization_for_the_event_date_and_files_are_kept(aws
     # Another day for the same organization must not be read.
     _put(s3, f"{PREFIX}org_id=1/year=2026/month=08/day=12/conversations_details_old.json", _details("old"))
 
-    result = handler(EVENT, _context())
+    result = run(EVENT, _context())
 
     organizations = _by_org(result)
     assert organizations["org-1"]["ids"] == ["a", "b", "c"]
@@ -80,7 +80,7 @@ def test_unreadable_or_unexpected_files_are_skipped_and_reported(aws):
     _put(s3, no_endpoint, {"conversations": [{"conversationId": "x"}]})
     _put(s3, f"{PREFIX}org_id=1/{DAY_PATH}notes.txt", b"not json, not listed")
 
-    result = handler(EVENT, _context())
+    result = run(EVENT, _context())
 
     assert _by_org(result)["org-1"]["ids"] == ["a"]
     assert result["conversations_details"]["files_read"] == 1
@@ -93,7 +93,7 @@ def test_conversations_without_an_id_are_ignored(aws):
     }
     _put(aws["s3"], f"{PREFIX}org_id=2/{DAY_PATH}mixed.json", body)
 
-    result = handler(EVENT, _context())
+    result = run(EVENT, _context())
 
     assert _by_org(result)["org-2"]["ids"] == ["a"]
 
@@ -103,13 +103,13 @@ def test_folders_that_are_not_org_partitions_are_ignored(aws):
     _put(s3, f"{PREFIX}org_id=1/{DAY_PATH}a.json", _details("a"))
     _put(s3, f"{PREFIX}_tmp/{DAY_PATH}b.json", _details("b"))
 
-    result = handler(EVENT, _context())
+    result = run(EVENT, _context())
 
     assert set(_by_org(result)) == {"org-1"}
 
 
 def test_a_day_without_files_produces_an_empty_payload_without_touching_genesys(aws, genesys_api):
-    result = handler(EVENT, _context())
+    result = run(EVENT, _context())
 
     assert read_payload(result)["organization"] == []
     assert result["conversations_details"]["files_read"] == 0
@@ -123,7 +123,7 @@ def test_the_date_is_required_as_yyyy_mm_dd(aws, event_date):
         event["date"] = event_date
 
     with pytest.raises(EventError, match='needs "date" as YYYY-MM-DD'):
-        handler(event, _context())
+        run(event, _context())
 
 
 def test_parse_date():

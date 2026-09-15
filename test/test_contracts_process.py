@@ -8,7 +8,7 @@ import polars as pl
 import pytest
 
 import src.s3_utils as s3_utils
-from src.main import handler
+from src.main import run
 from src.sources import EventError
 from test.conftest import (
     CONTRACT_KEY,
@@ -60,7 +60,7 @@ def test_contracts_run_writes_parquet_deletes_sources_and_builds_the_surveys_pay
 ):
     s3 = aws["s3"]
 
-    result = handler(EVENT, _context())
+    result = run(EVENT, _context())
 
     contracts = result["contracts"]
     assert contracts["contracts_processed"] == 1
@@ -109,7 +109,7 @@ def test_contracts_run_writes_parquet_deletes_sources_and_builds_the_surveys_pay
 
 
 def test_each_contract_contributes_ids_to_its_own_organization(aws, seeded_second_provider, genesys_api):
-    result = handler(EVENT, _context())
+    result = run(EVENT, _context())
 
     assert result["contracts"]["contracts_processed"] == 2
     assert result["contracts"]["processed_files"] == 3
@@ -143,7 +143,7 @@ def test_contracts_sharing_an_organization_share_one_group_and_token(
         Body=json.dumps(record),
     )
 
-    result = handler(EVENT, _context())
+    result = run(EVENT, _context())
 
     assert result["contracts"]["contracts_processed"] == 3
     # pel and bpp are both org-2: one organization entry, one token.
@@ -156,7 +156,7 @@ def test_a_failing_contract_does_not_stop_the_others(aws, seeded_second_provider
     broken_key = f"{CONTRACTS_PREFIX}bpp/cob/transcripcion.json"
     s3.put_object(Bucket=RESOURCES_BUCKET, Key=broken_key, Body=b"{}")
 
-    result = handler(EVENT, _context())
+    result = run(EVENT, _context())
 
     assert [failed["contract_key"] for failed in result["contracts"]["failed_contracts"]] == [broken_key]
     assert result["contracts"]["contracts_processed"] == 2
@@ -169,7 +169,7 @@ def test_source_files_are_kept_when_a_contract_fails_before_deletion(aws, seeded
 
     monkeypatch.setattr("src.contracts_process.write_hive_parquet", refined_unavailable)
 
-    result = handler(EVENT, _context())
+    result = run(EVENT, _context())
 
     assert result["contracts"]["failed_contracts"] == [
         {"contract_key": CONTRACT_KEY, "error": "refined bucket unavailable"}
@@ -183,7 +183,7 @@ def test_unreadable_source_files_are_skipped_and_left_in_place(aws, seeded_sourc
     bad_key = f"{SOURCE_PREFIX}/corrupted.json"
     s3.put_object(Bucket=PROVIDERS_LANDING_BUCKET, Key=bad_key, Body=b"")
 
-    result = handler(EVENT, _context())
+    result = run(EVENT, _context())
 
     bdo = result["contracts"]["results"][0]
     assert bdo["processed_files"] == 2
@@ -193,7 +193,7 @@ def test_unreadable_source_files_are_skipped_and_left_in_place(aws, seeded_sourc
 
 
 def test_contracts_without_source_files_produce_an_empty_payload(aws, genesys_api):
-    result = handler(EVENT, _context())
+    result = run(EVENT, _context())
 
     assert result["contracts"]["contracts_processed"] == 1
     assert result["contracts"]["results"][0]["processed_files"] == 0
@@ -207,7 +207,7 @@ def test_a_token_failure_reports_the_ids_that_can_no_longer_be_reread(aws, seede
 
     monkeypatch.setattr("src.main.get_token", oauth_down)
 
-    result = handler(EVENT, _context())
+    result = run(EVENT, _context())
 
     # The source files are already deleted, so the ids must survive in the response.
     assert _landing_keys(aws["s3"]) == []
@@ -221,19 +221,19 @@ def test_a_token_failure_reports_the_ids_that_can_no_longer_be_reread(aws, seede
 
 def test_an_unknown_ids_source_fails_before_touching_any_files(aws, seeded_source_files):
     with pytest.raises(EventError, match="Unknown ids_source 'contract'"):
-        handler({"tag": "surveys", "ids_source": "contract"}, _context())
+        run({"tag": "surveys", "ids_source": "contract"}, _context())
 
     assert _landing_keys(aws["s3"]) == sorted(seeded_source_files)
 
 
 def test_an_unknown_tag_fails_before_the_contracts_process_deletes_anything(aws, seeded_source_files):
     with pytest.raises(ValueError, match="No endpoints are tagged 'nope'"):
-        handler({"tag": "nope", "ids_source": "contracts"}, _context())
+        run({"tag": "nope", "ids_source": "contracts"}, _context())
 
     assert _landing_keys(aws["s3"]) == sorted(seeded_source_files)
 
 
 def test_runs_without_ids_source_do_not_report_a_contracts_summary(aws):
-    result = handler({"tag": "surveys", "organizations": []}, _context())
+    result = run({"tag": "surveys", "organizations": []}, _context())
 
     assert "contracts" not in result

@@ -24,14 +24,16 @@ Ids sources:
 
 Each payload is written to the logs bucket under its tag and this invocation's
 execution id; Unitary Status and Unitary Download read it from there. The
-response only says where each payload is and how many ids it holds -- never the
-payloads themselves, which could exceed the Step Functions 256 KB limit.
+handler returns, per payload, only {execution_id, bucket, payload_location,
+stages, failed_organizations, tag} -- never the payload itself, which could exceed the
+Step Functions 256 KB limit. The detailed run summary goes to the logs.
 
 An organization that can't be served (no `servers` entry, token failure) is left
 out of every payload. Each payload file lists it with its ids under
 `failed_organizations`, so a re-run has them; the response gives its id count.
 """
 
+import json
 import logging
 import uuid
 
@@ -42,7 +44,13 @@ from src.config import Settings, load_settings
 from src.conversations_details import collect_conversation_ids, parse_date
 from src.endpoints import conversation_tags, load_endpoint_catalog, select_stages
 from src.payload import build_organization_entry, build_payload, output_base_path
-from src.sources import ALL_TAGS, EventError, resolve_ids_by_organization, resolve_tag_selection
+from src.sources import (
+    ALL_TAGS,
+    EventError,
+    resolve_ids_by_organization,
+    resolve_tag_selection,
+    selects_tag_list,
+)
 from src.token_manager import get_token, load_config
 
 logger = logging.getLogger(__name__)
@@ -71,7 +79,7 @@ def _resolve_ids(s3_client, settings: Settings, event: dict, execution_id: str):
     """(ids by organization, source summary or None).
 
     Without `ids_source` the ids come from the event itself. With one, they come
-    from that process, and its summary goes into the response under its name.
+    from that process, and its summary goes into the logged run summary.
     The contracts process is imported here, not at module level: it's the only
     path that needs polars, so the other flows never load it.
     """
@@ -151,8 +159,8 @@ def _build_organizations(
 
 
 def _write_payload(s3_client, settings: Settings, tag, execution_id, stages, organizations, failed) -> dict:
-    """Writes one tag's payload and returns what the Step Function needs to find
-    it: its location and counts, never the payload itself."""
+    """Writes one tag's payload and returns where it went (bucket, key) with its
+    stages and ids per organization -- never the payload itself."""
     key = settings.payload_log_key(tag, execution_id)
     s3_utils.write_json(
         s3_client, settings.payload_log_bucket, key, build_payload(tag, organizations, failed)
@@ -160,13 +168,46 @@ def _write_payload(s3_client, settings: Settings, tag, execution_id, stages, org
     logger.info("Wrote %s payload to s3://%s/%s", tag, settings.payload_log_bucket, key)
     return {
         "tag": tag,
+        "bucket": settings.payload_log_bucket,
+        "key": key,
         "payload_location": f"s3://{settings.payload_log_bucket}/{key}",
         "stages": list(stages),
         "organizations": {entry["organization_id"]: len(entry["ids"]) for entry in organizations},
     }
 
 
+def _response(result: dict, payload: dict) -> dict:
+    """What the Lambda returns for one payload. The payload itself stays in the
+    logs bucket: `bucket` + `payload_location` (its key: prefix and file name)."""
+    return {
+        "execution_id": result["execution_id"],
+        "bucket": payload["bucket"],
+        "payload_location": payload["key"],
+        "stages": payload["stages"],
+        "failed_organizations": result["failed_organizations"],
+        "tag": payload["tag"],
+    }
+
+
 def handler(event, context):
+    """Runs the dispatcher and returns only where each payload was written.
+
+    An event with `tag` gets one response object; an event with `tags` (a list
+    or "all") gets a list of them, one per tag, even when the list has a single
+    tag -- so the shape depends on the event, never on how many tags ran. The
+    full run summary (ids per organization, the ids source's counts) goes to the
+    logs instead.
+    """
+    result = run(event, context)
+    logger.info("Run summary: %s", json.dumps(result, ensure_ascii=False, default=str))
+
+    responses = [_response(result, payload) for payload in result["payloads"]]
+    return responses if selects_tag_list(event) else responses[0]
+
+
+def run(event, context) -> dict:
+    """The whole dispatch: validate the tags, resolve the ids, build and write one
+    payload per tag. Returns the detailed summary the handler logs."""
     settings = load_settings()
     s3_client = boto3.client("s3")
     execution_id = getattr(context, "aws_request_id", None) or str(uuid.uuid4())

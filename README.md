@@ -166,28 +166,27 @@ An unknown `ids_source` value fails the run before any file is touched.
 
 ### Response
 
-The response says where each payload is and how many ids it holds, never the
-payload itself: a day of conversations can exceed the Step Functions 256 KB
-state limit.
+The handler returns where the payload was written, never the payload itself (a
+day of conversations can exceed the Step Functions 256 KB state limit):
 
 ```json
 {
-  "execution_id": "...",
-  "tags": ["surveys"],
-  "payloads": [
-    {
-      "tag": "surveys",
-      "payload_location": "s3://augusta-nexa-dev-logs/transacciones/genesys/api/payload_request_unitary/surveys/<execution_id>.json",
-      "stages": ["request_context"],
-      "organizations": {"org-1": 5100, "org-3": 820}
-    }
-  ],
-  "failed_organizations": [{"organization_id": "org-9", "id_count": 12, "error": "no servers entry for org_9"}]
+  "execution_id": "<Lambda request id>",
+  "bucket": "augusta-nexa-dev-logs",
+  "payload_location": "transacciones/genesys/api/payload_request_unitary/surveys/<execution_id>.json",
+  "stages": ["request_context"],
+  "failed_organizations": [{"organization_id": "org-9", "id_count": 12, "error": "no servers entry for org_9"}],
+  "tag": "surveys"
 }
 ```
 
-With an ids source, the response also carries that source's summary under its
-name (`contracts`, `conversations_details`), with counts rather than ids.
+- `payload_location` is the object key (prefix and file name) inside `bucket`.
+- An event with `tag` gets this object. An event with `tags` (a list or `"all"`)
+  gets a **list** of these objects, one per tag, even if the list has one tag,
+  so the shape depends on the event, not on how many tags ran.
+- `failed_organizations` gives an id count; the payload file lists their ids.
+- The detailed run summary (ids per organization, the contracts or
+  conversations-download counts) is logged as `Run summary: {...}` in CloudWatch.
 
 ### Where it's written
 
@@ -196,8 +195,8 @@ name (`contracts`, `conversations_details`), with counts rather than ids.
 The key includes the tag and the Lambda request id because Status and Download
 read the payload back: with one fixed key, a surveys run could overwrite an
 adherence payload that's still being processed. Pass each
-`payloads[].payload_location` to the next states (for example a Map state over
-`$.payloads`) instead of rebuilding the key.
+response's `bucket` + `payload_location` to the next states instead of
+rebuilding the key.
 
 ### Failures
 

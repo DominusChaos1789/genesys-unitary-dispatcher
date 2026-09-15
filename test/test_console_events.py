@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.main import handler
-from test.conftest import LANDING_BUCKET, load_fixture
+from test.conftest import LANDING_BUCKET, LOGS_BUCKET, load_fixture
 
 EVENTS_DIR = Path(__file__).resolve().parent.parent / "events"
 CONVERSATIONS_DETAILS_KEY = (
@@ -76,13 +76,23 @@ def test_event_names_fit_the_console_limit():
 @pytest.mark.parametrize("name", sorted(SUCCEEDS))
 def test_event_runs(seeded_landing, name):
     expected_tags, expected_organizations = SUCCEEDS[name]
+    event = _load(name)
 
-    result = handler(_load(name), SimpleNamespace(aws_request_id=f"console-{name}"))
+    response = handler(event, SimpleNamespace(aws_request_id=f"console-{name}"))
 
-    assert result["tags"] == expected_tags
-    assert result["failed_organizations"] == []
-    for payload in result["payloads"]:
-        assert payload["organizations"] == expected_organizations
+    # "tags" events get a list of responses, "tag" events a single one.
+    responses = response if isinstance(response, list) else [response]
+    assert isinstance(response, list) == ("tags" in event or "tags" in (event.get("detail") or {}))
+    assert [r["tag"] for r in responses] == expected_tags
+    for item in responses:
+        assert item["failed_organizations"] == []
+        assert item["bucket"] == LOGS_BUCKET
+        written = json.loads(
+            seeded_landing.get_object(Bucket=item["bucket"], Key=item["payload_location"])["Body"].read()
+        )
+        assert {
+            e["organization_id"]: len(e["ids"]) for e in written["organization"]
+        } == expected_organizations
 
 
 @pytest.mark.parametrize("name", sorted(FAILS))

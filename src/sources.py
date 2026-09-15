@@ -34,13 +34,24 @@ def _tags_list(tags) -> list[str] | str:
     return list(dict.fromkeys(tags))
 
 
+def _tag_source(event: dict) -> dict:
+    """Where the tag fields are: the top level, or EventBridge's `detail`."""
+    return event if ("tag" in event or "tags" in event) else (event.get("detail") or {})
+
+
+def selects_tag_list(event: dict) -> bool:
+    """Whether the event asked for `tags` (a list or "all") rather than one `tag`.
+    Decides the response shape, so it depends on the event, not the tag count."""
+    return "tags" in _tag_source(event)
+
+
 def resolve_tag_selection(event: dict) -> list[str] | str:
     """The tags to run, in order and without repeats -- or ALL_TAGS.
 
     Accepts `tag` (one) or `tags` (a list, or "all"), top-level or under
     `detail`, but not both keys at once.
     """
-    source = event if ("tag" in event or "tags" in event) else (event.get("detail") or {})
+    source = _tag_source(event)
     if "tag" in source and "tags" in source:
         raise EventError("Event has both 'tag' and 'tags'; send one of them")
     if "tags" in source:

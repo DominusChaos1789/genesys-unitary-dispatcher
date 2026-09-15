@@ -75,7 +75,7 @@ and deletes the transcription files it processed.
 | 7 | Output prefix | Pick the prefix the downloaded JSON will be saved under, from the tag's domain. | `payload.output_base_path` |
 | 8 | Per organization | Find its `servers` entry → get its token (once, for every tag) → build its entry for each tag, one request template per stage. | `main._build_organizations`, `token_manager.get_token`, `payload.build_organization_entry` |
 | 9 | Write | Save one payload per tag, `{"tag", "organization": [...], "failed_organizations": [...]}`, to the logs bucket. | `main._write_payload` |
-| 10 | Return | `tags`; for each payload its `payload_location`, `stages` and ids per organization; failed organizations with an id count. Never the payloads themselves (Step Functions' 256 KB limit). | `main.handler` |
+| 10 | Return | `{execution_id, bucket, payload_location, stages, failed_organizations, tag}`: one object for `tag`, a list of them for `tags`. `payload_location` is the key; failed organizations carry an id count. The detailed summary is logged, and the payload itself is never returned (Step Functions' 256 KB limit). | `main.handler`, `main.run` |
 
 ```mermaid
 sequenceDiagram
@@ -107,7 +107,7 @@ sequenceDiagram
         end
         RU->>LOGS: one payload per tag
     end
-    RU-->>SFN: payload locations + counts
+    RU-->>SFN: bucket + payload_location per tag
 ```
 
 ---
