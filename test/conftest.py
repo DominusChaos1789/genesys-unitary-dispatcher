@@ -15,6 +15,7 @@ PROVIDERS_LANDING_BUCKET = "augusta-nexa-dev-providers-landing"
 REFINED_BUCKET = "augusta-nexa-dev-refined"
 
 CORE_CONFIG_KEY = "params/genesys/api/core.json"
+DISPATCHER_CONFIG_KEY = "params/genesys/api/dispatcher.json"
 ENDPOINTS_PREFIX = "params/genesys/api"
 
 CORE_CONFIG = {
@@ -47,6 +48,7 @@ _ENV_VARS_UNDER_TEST = (
     "CONTRACT_KEY",
     "CONVERSATIONS_DETAILS_BUCKET",
     "CONVERSATIONS_DETAILS_PREFIX",
+    "DISPATCHER_CONFIG_KEY",
 )
 
 
@@ -81,6 +83,11 @@ def aws(aws_env):
             s3.create_bucket(Bucket=bucket)
 
         s3.put_object(Bucket=RESOURCES_BUCKET, Key=CORE_CONFIG_KEY, Body=json.dumps(CORE_CONFIG))
+        s3.put_object(
+            Bucket=RESOURCES_BUCKET,
+            Key=DISPATCHER_CONFIG_KEY,
+            Body=(FIXTURES_DIR / "dispatcher.json").read_bytes(),
+        )
         for name in ("unitary.json", "status.json", "jobs.json"):
             s3.put_object(
                 Bucket=RESOURCES_BUCKET,
@@ -204,23 +211,52 @@ def genesys_api(monkeypatch):
     return calls
 
 
+def add_dispatcher_flow(
+    s3, tag: str, *, domain: str = "transacciones", id_kind: str = "conversation"
+) -> None:
+    """Registers an extra flow in dispatcher.json for a test that adds an
+    endpoint dynamically (e.g. a second conversation flow next to surveys)."""
+    config = json.loads(s3.get_object(Bucket=RESOURCES_BUCKET, Key=DISPATCHER_CONFIG_KEY)["Body"].read())
+    config["flows"][tag] = {"enabled": True, "domain": domain, "id_kind": id_kind}
+    s3.put_object(Bucket=RESOURCES_BUCKET, Key=DISPATCHER_CONFIG_KEY, Body=json.dumps(config))
+
+
 # --- Reading back what a run wrote ------------------------------------------
-# The response only carries each payload's location and counts; the payload
-# itself lives in S3.
+# `run()` (the detailed, non-handler entry point used by most tests here)
+# returns "responses": a list of {bucket, payload_location, organization_id,
+# tag, ...} -- one per (tag, organization) pair that got its own flat file in
+# S3. These helpers fetch those files back for assertions.
 
 
-def read_payload(result: dict, tag: str | None = None) -> dict:
-    """The payload a run wrote for `tag` -- or for its only tag, when omitted."""
-    payloads = result["payloads"]
-    if tag is None:
-        assert len(payloads) == 1, f"expected one payload, got tags {[p['tag'] for p in payloads]}"
-        item = payloads[0]
-    else:
-        item = next(p for p in payloads if p["tag"] == tag)
-    bucket, key = item["payload_location"].removeprefix("s3://").split("/", 1)
+def _s3_get(bucket: str, key: str) -> dict:
     body = boto3.client("s3", region_name="us-east-1").get_object(Bucket=bucket, Key=key)["Body"].read()
     return json.loads(body)
 
 
+def responses_for(result: dict, tag: str | None = None) -> list[dict]:
+    """The response entries for `tag` -- or every entry, when omitted."""
+    responses = result["responses"]
+    return responses if tag is None else [r for r in responses if r["tag"] == tag]
+
+
+def read_payload(result: dict, tag: str | None = None, organization_id: str | None = None) -> dict:
+    """The payload file a run wrote for (`tag`, `organization_id`).
+
+    Both may be omitted when there's exactly one response entry (optionally
+    narrowed by `tag`); otherwise pass `organization_id` to pick one.
+    """
+    candidates = responses_for(result, tag)
+    if organization_id is not None:
+        candidates = [r for r in candidates if r["organization_id"] == organization_id]
+    assert len(candidates) == 1, f"expected exactly one payload, got {len(candidates)}: {candidates}"
+    item = candidates[0]
+    return _s3_get(item["bucket"], item["payload_location"])
+
+
 def payload_by_org(result: dict, tag: str | None = None) -> dict:
-    return {entry["organization_id"]: entry for entry in read_payload(result, tag)["organization"]}
+    """{organization_id: payload file contents} for every response entry
+    matching `tag` (or every entry, when omitted)."""
+    return {
+        item["organization_id"]: _s3_get(item["bucket"], item["payload_location"])
+        for item in responses_for(result, tag)
+    }

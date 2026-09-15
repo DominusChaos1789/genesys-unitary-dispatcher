@@ -33,5 +33,31 @@
             "timeZone": "America/Bogota"
         },
         "result_data": "jobId"
+    },
+    "transcripts_search": {
+        "tag": "transcripts",
+        "url": "/api/v2/speechandtextanalytics/transcripts/search",
+        "type": "unitary",
+        "method": "POST",
+        "path": "transcripts_search",
+        "body_templante": {
+            "conversationFilters": [
+                {
+                    "type": "and",
+                    "predicates": [
+                        {"type": "dimension", "dimension": "conversationId", "operator": "matches", "value": "{conversationId}"}
+                    ]
+                }
+            ]
+        },
+        "result_data": "state"
+    },
+    "transcripts_url": {
+        "tag": "transcripts",
+        "url": "/api/v2/speechandtextanalytics/conversations/{conversationId}/communications/{communicationId}/transcripturl",
+        "type": "url",
+        "method": "GET",
+        "path": "transcripts_url",
+        "result_data": "state"
     }
 }

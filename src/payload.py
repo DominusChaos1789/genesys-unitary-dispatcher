@@ -1,10 +1,14 @@
-"""Builds one tag's payload: an entry per Genesys organization, each carrying
-that organization's ids and a request template for every stage of the flow.
+"""Builds one organization's payload: its ids and a request template for
+every stage of the flow.
 
 Only the organization-specific parts are rendered -- the regional base_url
 and the bearer token. Per-id placeholders ({conversationId}, {mu_id},
-{user_id}, {jobId}, dates) stay in place for Unitary Status and Unitary
-Download to fill when they execute each call.
+{jobId}, {communicationId}, dates) stay in place for Unitary Status and
+Unitary Download to fill when they execute each call.
+
+Each organization gets its own flat payload file (see main._write_payloads):
+no "organization" array to unpack, so a Step Function can read one file
+straight into a Map state.
 """
 
 from typing import Any
@@ -14,19 +18,11 @@ from src.templates import render_template
 _COPIED_FIELDS = ("type", "path", "result_data")
 
 
-# Where a flow's downloaded JSON is saved, by the tag's domain -- its first
-# segment ("funcionarios_adherencia" -> "funcionarios"). Workforce-management
-# data goes under config.output.base_path_wfm; everything else (transacciones:
-# surveys, conversations, ...) under config.output.base_path.
-OUTPUT_BASE_PATH_KEY_BY_DOMAIN = {"funcionarios": "base_path_wfm"}
-DEFAULT_OUTPUT_BASE_PATH_KEY = "base_path"
-
-
-def output_base_path(output_config: dict[str, Any], tag: str) -> str:
-    domain = tag.split("_", 1)[0]
-    key = OUTPUT_BASE_PATH_KEY_BY_DOMAIN.get(domain, DEFAULT_OUTPUT_BASE_PATH_KEY)
+def output_base_path(output_config: dict[str, Any], key: str) -> str:
+    """The prefix a flow's downloaded JSON is saved under, from `config.output`
+    (SSM) -- `key` comes from dispatcher_config.output_base_path_key(tag)."""
     if key not in output_config:
-        raise ValueError(f"Tag {tag!r} is saved under config.output.{key}, which isn't set")
+        raise ValueError(f"config.output.{key} isn't set")
     return output_config[key]
 
 
@@ -78,11 +74,14 @@ def build_organization_entry(
     return entry
 
 
-def build_payload(
+def build_organization_payload(
     tag: str,
-    organizations: list[dict[str, Any]],
+    entry: dict[str, Any],
     failed_organizations: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """The file Unitary Status and Unitary Download read. Organizations that
-    couldn't be served are listed with their ids, so a re-run has them."""
-    return {"tag": tag, "organization": organizations, "failed_organizations": failed_organizations or []}
+    """The file Unitary Status and Unitary Download read for one organization:
+    a flat object, no "organization" array. Organizations that couldn't be
+    served in this run are listed with their ids under `failed_organizations`
+    (the same list in every organization's file for this tag), so a re-run
+    has them even though this file's own organization is a successful one."""
+    return {"tag": tag, **entry, "failed_organizations": failed_organizations or []}

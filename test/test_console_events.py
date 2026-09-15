@@ -20,21 +20,24 @@ CONVERSATIONS_DETAILS_KEY = (
 )
 MANAGEMENT_UNITS_KEY = "funcionarios/genesys/api/management_units/2026-08-13.json"
 
-# event file -> (tags run, ids per organization in each payload)
+# event file -> {(tag, organization_id): id_count} for every payload file the run must write.
 SUCCEEDS = {
-    "01-smoke-empty.json": (["surveys"], {}),
-    "02-surveys-inline.json": (["surveys"], {"org-1": 1}),
-    "03-surveys-conv-details.json": (["surveys"], {"org-1": 2}),
-    "04-tags-list.json": (["surveys"], {"org-1": 2}),
-    "05-tags-all.json": (["surveys"], {"org-1": 2}),
-    "06-surveys-contracts.json": (["surveys"], {"org-3": 2}),
-    "07-adherence-inline.json": (["funcionarios_adherencia"], {"org-1": 1}),
-    "08-adherence-s3-file.json": (["funcionarios_adherencia"], {"org-1": 1}),
-    "09-eventbridge-s3.json": (["funcionarios_adherencia"], {"org-1": 1}),
+    "01-smoke-empty.json": {},
+    "02-surveys-inline.json": {("surveys", "org-1"): 1},
+    "03-surveys-conv-details.json": {("surveys", "org-1"): 2},
+    "04-tags-list.json": {("surveys", "org-1"): 2},
+    # "tags": "all" -- every enabled conversation-id flow in dispatcher.json,
+    # today surveys and transcripts (adherence takes management-unit ids).
+    "05-tags-all.json": {("surveys", "org-1"): 2, ("transcripts", "org-1"): 2},
+    "06-surveys-contracts.json": {("surveys", "org-3"): 2},
+    "07-adherence-inline.json": {("funcionarios_adherencia", "org-1"): 1},
+    "08-adherence-s3-file.json": {("funcionarios_adherencia", "org-1"): 1},
+    "09-eventbridge-s3.json": {("funcionarios_adherencia", "org-1"): 1},
+    "15-transcripts-inline.json": {("transcripts", "org-1"): 1},
 }
 # event file -> error message the run must fail with
 FAILS = {
-    "10-err-unknown-tag.json": "No endpoints are tagged 'survey'",
+    "10-err-unknown-tag.json": "not declared in dispatcher.json",
     "11-err-unknown-source.json": "Unknown ids_source 'contract'",
     "12-err-tag-and-tags.json": "both 'tag' and 'tags'",
     "13-err-missing-date.json": 'needs "date" as YYYY-MM-DD',
@@ -75,24 +78,20 @@ def test_event_names_fit_the_console_limit():
 
 @pytest.mark.parametrize("name", sorted(SUCCEEDS))
 def test_event_runs(seeded_landing, name):
-    expected_tags, expected_organizations = SUCCEEDS[name]
-    event = _load(name)
+    expected = SUCCEEDS[name]
 
-    response = handler(event, SimpleNamespace(aws_request_id=f"console-{name}"))
+    responses = handler(_load(name), SimpleNamespace(aws_request_id=f"console-{name}"))
 
-    # "tags" events get a list of responses, "tag" events a single one.
-    responses = response if isinstance(response, list) else [response]
-    assert isinstance(response, list) == ("tags" in event or "tags" in (event.get("detail") or {}))
-    assert [r["tag"] for r in responses] == expected_tags
+    # Always a flat list: one entry per (tag, organization) pair that got a file.
+    assert isinstance(responses, list)
+    assert {(r["tag"], r["organization_id"]) for r in responses} == set(expected)
     for item in responses:
         assert item["failed_organizations"] == []
         assert item["bucket"] == LOGS_BUCKET
         written = json.loads(
             seeded_landing.get_object(Bucket=item["bucket"], Key=item["payload_location"])["Body"].read()
         )
-        assert {
-            e["organization_id"]: len(e["ids"]) for e in written["organization"]
-        } == expected_organizations
+        assert len(written["ids"]) == expected[(item["tag"], item["organization_id"])]
 
 
 @pytest.mark.parametrize("name", sorted(FAILS))

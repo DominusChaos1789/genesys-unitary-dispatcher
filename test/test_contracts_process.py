@@ -22,7 +22,6 @@ from test.conftest import (
     SOURCE_PREFIX,
     load_fixture,
     payload_by_org,
-    read_payload,
 )
 
 EVENT = {"tag": "surveys", "ids_source": "contracts"}
@@ -175,7 +174,7 @@ def test_source_files_are_kept_when_a_contract_fails_before_deletion(aws, seeded
         {"contract_key": CONTRACT_KEY, "error": "refined bucket unavailable"}
     ]
     assert _landing_keys(aws["s3"]) == sorted(seeded_source_files)
-    assert read_payload(result)["organization"] == []
+    assert result["responses"] == []
 
 
 def test_unreadable_source_files_are_skipped_and_left_in_place(aws, seeded_source_files):
@@ -197,7 +196,7 @@ def test_contracts_without_source_files_produce_an_empty_payload(aws, genesys_ap
 
     assert result["contracts"]["contracts_processed"] == 1
     assert result["contracts"]["results"][0]["processed_files"] == 0
-    assert read_payload(result)["organization"] == []
+    assert result["responses"] == []
     assert genesys_api["load_config"] == []
 
 
@@ -209,13 +208,13 @@ def test_a_token_failure_reports_the_ids_that_can_no_longer_be_reread(aws, seede
 
     result = run(EVENT, _context())
 
-    # The source files are already deleted, so the ids must survive in the response.
+    # The source files are already deleted, so the ids must survive somewhere:
+    # since org-3 is the only organization here and it failed, no payload file
+    # is written at all -- the ids are only in the run's own failed_organizations.
     assert _landing_keys(aws["s3"]) == []
+    assert result["responses"] == []
     assert result["failed_organizations"] == [
         {"organization_id": "org-3", "id_count": 2, "error": "oauth down"}
-    ]
-    assert read_payload(result)["failed_organizations"] == [
-        {"organization_id": "org-3", "ids": sorted(BDO_IDS), "error": "oauth down"}
     ]
 
 
@@ -227,7 +226,7 @@ def test_an_unknown_ids_source_fails_before_touching_any_files(aws, seeded_sourc
 
 
 def test_an_unknown_tag_fails_before_the_contracts_process_deletes_anything(aws, seeded_source_files):
-    with pytest.raises(ValueError, match="No endpoints are tagged 'nope'"):
+    with pytest.raises(ValueError, match="not declared in dispatcher.json"):
         run({"tag": "nope", "ids_source": "contracts"}, _context())
 
     assert _landing_keys(aws["s3"]) == sorted(seeded_source_files)

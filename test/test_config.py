@@ -91,13 +91,21 @@ def test_resolve_bucket():
 
 
 def test_payload_log_key_template(monkeypatch):
-    assert load_settings().payload_log_key("surveys", "req-1") == (
-        "transacciones/genesys/api/payload_request_unitary/surveys/req-1.json"
+    assert load_settings().payload_log_key("surveys", "req-1", "org-3") == (
+        "transacciones/genesys/api/payload_request_unitary/surveys/req-1/org-3.json"
     )
 
-    monkeypatch.setenv("PAYLOAD_LOG_KEY_TEMPLATE", "logs/{tag}.json")
+    monkeypatch.setenv("PAYLOAD_LOG_KEY_TEMPLATE", "logs/{tag}/{organization_id}.json")
 
-    assert load_settings().payload_log_key("surveys", "req-1") == "logs/surveys.json"
+    assert load_settings().payload_log_key("surveys", "req-1", "org-3") == "logs/surveys/org-3.json"
+
+
+def test_dispatcher_config_key_default_and_override(monkeypatch):
+    assert load_settings().dispatcher_config_key == "params/genesys/api/dispatcher.json"
+
+    monkeypatch.setenv("DISPATCHER_CONFIG_KEY", "params/other/dispatcher.json")
+
+    assert load_settings().dispatcher_config_key == "params/other/dispatcher.json"
 
 
 def test_contracts_process_defaults():

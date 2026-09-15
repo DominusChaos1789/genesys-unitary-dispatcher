@@ -8,10 +8,19 @@ stages, keyed by their `type`:
     unitary -> request_context   the direct call, or the initial listing
     init    -> request_init      starts an async job and returns a jobId
     status  -> request_status    polled until the job completes
+    url     -> request_url       a follow-up call needing data the first call
+                                  returned (e.g. transcripts: search finds a
+                                  communicationId, then this fetches its URL)
 
-So "surveys" is a single request_context, while "funcionarios_adherencia" is
-request_init + request_status: one bulk job per management unit, which covers
-every user in it. A new flow is added by tagging its endpoints -- no code change.
+So "surveys" is a single request_context, "funcionarios_adherencia" is
+request_init + request_status (one bulk job per management unit, covering
+every user in it), and "transcripts" is request_context + request_url. A new
+flow is added by tagging its endpoints -- no code change, as long as it's
+built from stage types already listed here; a genuinely new call pattern
+needs a new entry in STAGE_BY_TYPE/STAGE_ORDER.
+
+Which tags may run at all, and where each one's output goes, is *not* decided
+here -- see dispatcher_config.py.
 """
 
 from typing import Any
@@ -19,9 +28,13 @@ from typing import Any
 import src.s3_utils as s3_utils
 from src.config import Settings
 
-STAGE_BY_TYPE = {"unitary": "request_context", "init": "request_init", "status": "request_status"}
-STAGE_ORDER = ("request_context", "request_init", "request_status")
-CONVERSATION_ID_PLACEHOLDER = "{conversationId}"
+STAGE_BY_TYPE = {
+    "unitary": "request_context",
+    "init": "request_init",
+    "status": "request_status",
+    "url": "request_url",
+}
+STAGE_ORDER = ("request_context", "request_init", "request_status", "request_url")
 
 
 def _references(value: Any) -> list[str]:
@@ -52,19 +65,6 @@ def load_endpoint_catalog(s3_client, settings: Settings) -> dict[str, dict]:
             definitions = s3_utils.read_json(s3_client, settings.resources_bucket, reference)
             _merge(catalog, definitions, reference)
     return catalog
-
-
-def conversation_tags(catalog: dict[str, dict]) -> list[str]:
-    """Tags of every flow that takes conversation ids -- those with an endpoint
-    whose url has {conversationId}. This is what `"tags": "all"` expands to, so
-    flows keyed by other ids (e.g. adherence's {mu_id}) are never included."""
-    return sorted(
-        {
-            spec["tag"]
-            for spec in catalog.values()
-            if spec.get("tag") and CONVERSATION_ID_PLACEHOLDER in spec.get("url", "")
-        }
-    )
 
 
 def select_stages(catalog: dict[str, dict], tag: str) -> dict[str, tuple[str, dict]]:

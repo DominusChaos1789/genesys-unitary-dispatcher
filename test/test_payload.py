@@ -1,6 +1,6 @@
 import pytest
 
-from src.payload import build_organization_entry, build_payload, build_stage, output_base_path
+from src.payload import build_organization_entry, build_organization_payload, build_stage, output_base_path
 from test.conftest import GENESYS_BASE_PATH, GENESYS_CONNECTION, GENESYS_SERVERS
 
 TOKEN = {"access_token": "abc"}
@@ -81,35 +81,35 @@ def test_organization_entry_has_ids_then_one_key_per_stage():
     assert entry["request_init"]["url"] == "/init"
 
 
-def test_payload_shape():
-    assert build_payload("surveys", [{"organization_id": "org-1"}]) == {
+def test_organization_payload_is_flat_tag_first_then_the_entry_then_failures():
+    entry = {"organization_id": "org-1", "ids": ["a"], "request_context": {"url": "/x"}}
+
+    payload = build_organization_payload("surveys", entry)
+
+    assert list(payload) == ["tag", "organization_id", "ids", "request_context", "failed_organizations"]
+    assert payload == {
         "tag": "surveys",
-        "organization": [{"organization_id": "org-1"}],
+        "organization_id": "org-1",
+        "ids": ["a"],
+        "request_context": {"url": "/x"},
         "failed_organizations": [],
     }
 
 
-def test_payload_lists_failed_organizations_with_their_ids():
+def test_organization_payload_lists_failed_organizations_with_their_ids():
+    entry = {"organization_id": "org-1", "ids": ["a"]}
     failed = [{"organization_id": "org-9", "ids": ["x"], "error": "boom"}]
 
-    assert build_payload("surveys", [], failed)["failed_organizations"] == failed
+    assert build_organization_payload("surveys", entry, failed)["failed_organizations"] == failed
 
 
-@pytest.mark.parametrize(
-    "tag, expected",
-    [
-        ("funcionarios_adherencia", "funcionarios/genesys/api"),
-        ("funcionarios", "funcionarios/genesys/api"),
-        ("surveys", "transacciones/genesys/api"),
-        ("conversaciones_encuestas", "transacciones/genesys/api"),
-    ],
-)
-def test_output_base_path_follows_the_tags_domain(tag, expected):
+def test_output_base_path_looks_up_the_given_key():
     output = {"base_path": "transacciones/genesys/api", "base_path_wfm": "funcionarios/genesys/api"}
 
-    assert output_base_path(output, tag) == expected
+    assert output_base_path(output, "base_path") == "transacciones/genesys/api"
+    assert output_base_path(output, "base_path_wfm") == "funcionarios/genesys/api"
 
 
 def test_an_output_base_path_missing_from_config_is_an_error():
     with pytest.raises(ValueError, match="config.output.base_path_wfm"):
-        output_base_path({"base_path": "transacciones/genesys/api"}, "funcionarios_adherencia")
+        output_base_path({"base_path": "transacciones/genesys/api"}, "base_path_wfm")

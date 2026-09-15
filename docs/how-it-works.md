@@ -47,7 +47,7 @@ What Request Unitary reads:
 | Source | What it provides |
 |---|---|
 | The event | the **tag** (which flow) and the **ids** per organization, or where to find them |
-| `augusta-nexa-<env>-resources` | `core.json` and the endpoint files (`unitary.json`, `status.json`) |
+| `augusta-nexa-<env>-resources` | `core.json`, `dispatcher.json` (which tags may run, and where their output goes) and the endpoint files (`unitary.json`, `status.json`) |
 | SSM `/augusta-nexa-<env>/genesys/api` | `connection` (URLs, header template, OAuth settings), `servers` (region per organization), `config` (output prefixes) |
 | Secrets Manager, same prefix | each organization's OAuth `client_id` / `client_secret` |
 | DynamoDB via the runtime-control layer | cached OAuth tokens |
@@ -55,8 +55,8 @@ What Request Unitary reads:
 | `augusta-nexa-<env>-landing`, `conversations_details/` | the day's downloaded conversations, when the run uses that source (read-only) |
 | `CONTRACTS_PREFIX` in the resources bucket | the contracts, one per provider/operation |
 
-What it writes: one payload per tag per run to
-`augusta-nexa-<env>-logs/transacciones/genesys/api/payload_request_unitary/<tag>/<execution_id>.json`.
+What it writes: one flat payload file **per organization per tag** to
+`augusta-nexa-<env>-logs/transacciones/genesys/api/payload_request_unitary/<tag>/<execution_id>/<organization_id>.json`.
 With the contracts process it also writes parquet to `augusta-nexa-<env>-refined`
 and deletes the transcription files it processed.
 
@@ -68,14 +68,14 @@ and deletes the transcription files it processed.
 |---|---|---|---|
 | 1 | Settings | Environment token from `ENV_PREFIX` → `ENVIRONMENT` → `PROFILE` → `STACK_ID` (default `dev`); bucket names, SSM path and resource name derive from it. | `config.load_settings` |
 | 2 | Execution id | The Lambda request id, or a UUID when there is no Lambda context. | `main.handler` |
-| 3 | Tags | `tag` (one) or `tags` (a list, or `"all"`: every conversation flow), top-level or under `detail`. | `sources.resolve_tag_selection`, `endpoints.conversation_tags` |
-| 4 | Stages | Load the `core.json` groups listed in `ENDPOINT_GROUPS`, keep the endpoints carrying each tag, and map each one's `type` to a stage. Every tag is checked **here**, before any ids are read. | `endpoints.load_endpoint_catalog`, `endpoints.select_stages` |
+| 3 | Tags | `tag` (one) or `tags` (a list, or `"all"`), top-level or under `detail`. | `sources.resolve_tag_selection` |
+| 4 | Validate | Load `dispatcher.json` and the endpoint catalog. Expand `"all"` to every enabled flow with `id_kind` `"conversation"`. For every tag: it must be declared and enabled in `dispatcher.json`, resolve its output-prefix key from its domain, and have endpoints for each stage it needs. Every tag is checked **here**, before any ids are read. | `dispatcher_config.load_dispatcher_config`, `dispatcher_config.conversation_tags`, `dispatcher_config.flow_config`, `dispatcher_config.output_base_path_key`, `endpoints.load_endpoint_catalog`, `endpoints.select_stages` |
 | 5 | Ids | With `"ids_source": "contracts"`: run the [contracts process](#contracts-process-where-surveys-ids-come-from) and group its conversation ids by organization. With `"ids_source": "conversations_details"`: read that `date`'s [conversation files](#conversations-download-ids-without-a-contract) per `org_id=` folder. Otherwise from `event.organizations`, else the S3 file in `event.ids_location`, else the S3 object named in `event.detail`. Organizations merge, ids are de-duplicated and sorted, organizations without ids are dropped. | `main._resolve_ids`, `contracts_process.run_contracts`, `conversations_details.collect_conversation_ids`, `sources.resolve_ids_by_organization` |
 | 6 | Genesys config | Once per run, and only if there are ids: `connection`, `servers`, `config` and the OAuth secrets. | `token_manager.load_config` |
-| 7 | Output prefix | Pick the prefix the downloaded JSON will be saved under, from the tag's domain. | `payload.output_base_path` |
+| 7 | Output prefix | Resolve each tag's output-prefix key (from step 4) against `config.output` (SSM). | `payload.output_base_path` |
 | 8 | Per organization | Find its `servers` entry → get its token (once, for every tag) → build its entry for each tag, one request template per stage. | `main._build_organizations`, `token_manager.get_token`, `payload.build_organization_entry` |
-| 9 | Write | Save one payload per tag, `{"tag", "organization": [...], "failed_organizations": [...]}`, to the logs bucket. | `main._write_payload` |
-| 10 | Return | `{execution_id, bucket, payload_location, stages, failed_organizations, tag}`: one object for `tag`, a list of them for `tags`. `payload_location` is the key; failed organizations carry an id count. The detailed summary is logged, and the payload itself is never returned (Step Functions' 256 KB limit). | `main.handler`, `main.run` |
+| 9 | Write | Save one **flat** file per (tag, organization) pair, `{"tag", "organization_id", "ids", <stages>, "failed_organizations"}`, to the logs bucket. | `main._write_payloads`, `payload.build_organization_payload` |
+| 10 | Return | A list, one entry per (tag, organization) pair written: `{execution_id, bucket, payload_location, organization_id, stages, failed_organizations, tag}`. `payload_location` is the key; failed organizations carry an id count. The detailed summary is logged, and the payload itself is never returned (Step Functions' 256 KB limit). | `main.handler`, `main.run` |
 
 ```mermaid
 sequenceDiagram
@@ -89,11 +89,11 @@ sequenceDiagram
     participant LOGS as logs bucket
 
     SFN->>RU: event (tag + ids)
-    RU->>RES: core.json and endpoint files
-    Note over RU: select the tag's stages<br/>(unknown tag: fail now)
+    RU->>RES: core.json, dispatcher.json, endpoint files
+    Note over RU: dispatcher.json: declared + enabled?<br/>select the tag's stages<br/>(either check fails: fail now)
     RU->>SRC: ids per organization
     alt no ids
-        RU->>LOGS: empty payload per tag
+        RU->>LOGS: no files written
     else ids found
         RU->>SSM: connection, servers, config, secrets
         loop each organization
@@ -103,11 +103,11 @@ sequenceDiagram
                 OAUTH-->>RU: access_token
                 RU->>DDB: store token and expiry
             end
-            Note over RU: one template per stage,<br/>with this organization's token and region
+            Note over RU: one flat file per (tag, organization),<br/>with this organization's token and region
         end
-        RU->>LOGS: one payload per tag
+        RU->>LOGS: one file per (tag, organization)
     end
-    RU-->>SFN: bucket + payload_location per tag
+    RU-->>SFN: bucket + payload_location per (tag, organization)
 ```
 
 ---
@@ -123,25 +123,31 @@ and stages always come out in this order:
 | `unitary` | `request_context` | a direct call per id (or an initial listing) |
 | `init` | `request_init` | starts an asynchronous job, returns a `jobId` |
 | `status` | `request_status` | polled until the job completes |
+| `url` | `request_url` | a follow-up call needing data the first call returned (transcripts: search → this fetches the URL, once `{communicationId}` is known) |
 
 A flow needs at least one stage and at most one endpoint per stage. Endpoints
-without a `tag` belong to no flow.
+without a `tag` belong to no flow. But being tagged isn't enough to *run*: the
+tag also has to be declared and `enabled` in **dispatcher.json**
+(`src/dispatcher_config.py`), which is the actual switch for whether a flow
+may execute and which output domain it belongs to.
 
 A run can execute several flows over the same ids (`"tags": ["surveys", "recordings"]`)
-or every conversation flow (`"tags": "all"`: every tag with an endpoint whose
-URL contains `{conversationId}`). The ids are read once and each organization's
-token is requested once; each tag gets its own payload file.
+or every enabled conversation flow (`"tags": "all"`, from dispatcher.json's
+`id_kind: "conversation"` flows — not by scanning endpoint URLs). The ids are
+read once and each organization's token is requested once; each
+(tag, organization) pair gets its own flat payload file.
 
 **To add a flow:**
 
 1. Add or tag its endpoints in the endpoint files (`unitary.json` /
-   `status.json`) with the new tag.
-2. If its domain isn't `funcionarios` and it shouldn't go under
-   `transacciones/genesys/api`, add the domain to
-   `OUTPUT_BASE_PATH_KEY_BY_DOMAIN` in [src/payload.py](../src/payload.py).
+   `status.json`) with the new tag, built from stage types already in the
+   table above (a new call pattern needs a code change here first).
+2. Add it to `dispatcher.json`: `enabled`, its `domain` (existing or new —
+   a new domain needs an `output_base_path_key` entry too), and its `id_kind`.
 3. Trigger the Step Function with `{"tag": "<new tag>", ...ids...}`.
 
-No change to this Lambda is needed for step 1. Step 2 is a one-line mapping.
+No code change is needed for a flow built from existing stage types — only
+steps 1-2, both S3 edits.
 
 ---
 
@@ -155,6 +161,15 @@ No change to this Lambda is needed for step 1. Step 2 is a one-line mapping.
 | Stages | `request_context`: `GET /api/v2/quality/conversations/{conversationId}/surveys` |
 | Saved under | `transacciones/genesys/api` |
 | Next | Download calls the template once per conversation id. No job, no polling. |
+
+### `transcripts`
+
+| | |
+|---|---|
+| Ids | Genesys conversation ids, grouped by organization |
+| Stages | `request_context`: `POST /api/v2/speechandtextanalytics/transcripts/search` → `request_url`: `GET .../conversations/{conversationId}/communications/{communicationId}/transcripturl` |
+| Saved under | `transacciones/genesys/api` |
+| Next | Download executes the search, reads the `communicationId` out of its result, fills it into `request_url`'s template (this Lambda leaves it as a placeholder, since it only comes from the search response), and fetches the transcript URL. |
 
 ### Contracts process: where surveys ids come from
 
@@ -233,23 +248,27 @@ flowchart LR
 
 ## 5. How an organization entry is built
 
-Each entry is `{"organization_id", "ids", <one key per stage>}`. Every stage
-template is built the same way:
+Each organization's file is **flat**: `{"tag", "organization_id", "ids", <one
+key per stage>, "failed_organizations"}` — no `"organization"` array to
+unpack. Every stage template is built the same way:
 
 | Field | Built from | Rendered here? |
 |---|---|---|
 | `base_url` | `connection.base_url` with the server's `region_id` | yes: `https://api.usw2.pure.cloud` |
-| `url` | the endpoint's `url` | **no**: `{conversationId}`, `{mu_id}`, `{jobId}` stay for downstream |
+| `url` | the endpoint's `url` | **no**: `{conversationId}`, `{mu_id}`, `{jobId}`, `{communicationId}` stay for downstream |
 | `method` | the endpoint's `method` | n/a |
 | `headers` | `connection.header_template` with the organization's `access_token` | yes |
 | `payload` | the endpoint's `body_templante` (or `body_template`) | **no** |
 | `params` | the endpoint's `params_template` | **no** |
 | `type`, `path`, `result_data` | copied from the endpoint | n/a |
-| `base_path` | `config.output.base_path_wfm` for `funcionarios_*`, else `config.output.base_path` | n/a |
+| `base_path` | `config.output.<key>`, where `<key>` comes from the tag's dispatcher.json domain | n/a |
 | `server_path` | the server's `relative_path`, e.g. `org_id=3/` | n/a |
 
 Only what is specific to the **organization** is filled in (region and token).
-Everything specific to an **id** is left for the Lambdas that execute the calls.
+Everything specific to an **id** is left for the Lambdas that execute the
+calls. `failed_organizations` and `tag` are added once the entry is complete
+(`payload.build_organization_payload`), then the whole thing is written as one
+file per organization.
 
 ---
 
@@ -278,17 +297,19 @@ per-flow key would miss the cached token and request a second one.
 | Situation | Outcome |
 |---|---|
 | Event without a tag | run fails |
+| A tag not declared in dispatcher.json, or declared with `enabled: false` | run fails, before ids are read |
 | No endpoints carry the tag; a tagged endpoint's `type` maps to no stage; two endpoints for the same stage | run fails, before ids are read |
 | `core.json` lacks a configured group; one endpoint defined differently in two files | run fails |
+| dispatcher.json is missing `domains`/`flows`, a domain has no `output_base_path_key`, or a flow's `domain` doesn't exist | run fails |
 | Event gives no ids source; an organization entry lacks `organization_id` or `ids` | run fails |
 | `ids_source` is not `contracts` or `conversations_details` | run fails, before any file is touched |
 | `conversations_details` without a valid `date` | run fails, before any file is read |
 | `config.output` lacks the prefix key for the tag's domain | run fails |
-| No ids at all | empty payload written; Genesys and SSM are not called |
+| No ids at all | no payload files written; Genesys and SSM are not called |
 | Both `tag` and `tags`; `tags` not `"all"` or a list of names | run fails |
-| `"tags": "all"` finds no conversation flow | run fails |
-| An organization has no `servers` entry | left out of every payload; listed with its ids in each payload file and with an id count in the response; the others continue |
-| An organization's token can't be obtained | left out of every payload; listed with its ids in each payload file and with an id count in the response; the others continue |
+| `"tags": "all"` finds no enabled conversation flow | run fails |
+| An organization has no `servers` entry | gets no payload file for any tag; every other organization's file for that tag lists it with its ids, and the response with an id count; the others continue |
+| An organization's token can't be obtained | same as above |
 | A contract fails (malformed contract, parquet write error, ...) | listed in `contracts.failed_contracts`; its source files stay; the other contracts continue |
 | A transcription file can't be read | skipped and left in place; the rest of that contract runs |
 | A conversations file can't be read or has no `endpoint` list | skipped and listed in `conversations_details.skipped_files`; the other files are read |
@@ -302,7 +323,8 @@ them. Problems specific to one organization only affect that organization.
 
 | File | Responsibility |
 |---|---|
-| [src/main.py](../src/main.py) | `handler`: runs the steps above; `_resolve_ids`: event or contracts process; `_build_organizations`: the per-organization loop |
+| [src/main.py](../src/main.py) | `handler`/`run`: runs the steps above; `_resolve_ids`: event or an ids source; `_build_organizations`: the per-organization loop; `_write_payloads`: one flat file per (tag, organization) |
+| [src/dispatcher_config.py](../src/dispatcher_config.py) | loads and validates dispatcher.json; which tags may run, their domain, their `id_kind` |
 | [src/contracts_process.py](../src/contracts_process.py) | the contracts process: per-contract loop, parquet writes, source deletion, ids by organization |
 | [src/conversations_details.py](../src/conversations_details.py) | ids from the Genesys conversations download: date partition, `org_id=` folders, `conversationId` |
 | [src/contract.py](../src/contract.py) | the contract model; contract discovery and loading |
@@ -310,9 +332,9 @@ them. Problems specific to one organization only affect that organization.
 | [src/technical_columns.py](../src/technical_columns.py) | technical columns engine; `output_core` / `output_atts` rows |
 | [src/parquet_io.py](../src/parquet_io.py) | Hive-partitioned parquet writes with polars |
 | [src/config.py](../src/config.py) | environment variables → `Settings`; bucket and key naming |
-| [src/sources.py](../src/sources.py) | the tag and the ids from the event (inline, S3 file, or S3 event) |
+| [src/sources.py](../src/sources.py) | the tag(s) and the ids from the event (inline, S3 file, or S3 event) |
 | [src/endpoints.py](../src/endpoints.py) | loads the endpoint catalog; selects and orders a tag's stages |
-| [src/payload.py](../src/payload.py) | output prefix by domain; builds stage templates, organization entries and the payload |
+| [src/payload.py](../src/payload.py) | builds stage templates, organization entries and the flat per-organization payload |
 | [src/token_manager.py](../src/token_manager.py) | Genesys config from SSM; per-organization token: cache, request, store |
 | [src/params.py](../src/params.py) | reads SSM parameters and Secrets Manager secrets under a path |
 | [src/client_request.py](../src/client_request.py) | HTTP call used for the OAuth token request |

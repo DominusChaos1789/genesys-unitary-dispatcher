@@ -3,7 +3,7 @@ import json
 import pytest
 
 from src.config import load_settings
-from src.endpoints import conversation_tags, load_endpoint_catalog, select_stages
+from src.endpoints import load_endpoint_catalog, select_stages
 from test.conftest import CORE_CONFIG_KEY, ENDPOINTS_PREFIX, RESOURCES_BUCKET, load_fixture
 
 
@@ -149,14 +149,19 @@ def test_a_tagged_endpoint_whose_type_maps_to_no_stage_is_an_error():
         select_stages(catalog, "surveys")
 
 
-def test_conversation_tags_are_the_flows_taking_conversation_ids():
-    catalog = _catalog()
-    catalog["conversation_recordings"] = {
-        "tag": "recordings",
-        "type": "unitary",
-        "url": "/api/v2/conversations/{conversationId}/recordings",
-    }
-    catalog["untagged_conversation_call"] = {"type": "unitary", "url": "/api/v2/x/{conversationId}"}
+def test_transcripts_is_search_then_a_follow_up_url_stage():
+    stages = select_stages(_catalog(), "transcripts")
 
-    # funcionarios_adherencia uses {mu_id}/{jobId}; untagged endpoints belong to no flow.
-    assert conversation_tags(catalog) == ["recordings", "surveys"]
+    assert list(stages) == ["request_context", "request_url"]
+    assert [name for name, _ in stages.values()] == ["transcripts_search", "transcripts_url"]
+
+
+def test_url_type_endpoints_map_to_the_request_url_stage():
+    catalog = {
+        "search": {"tag": "t", "type": "unitary", "url": "/s"},
+        "geturl": {"tag": "t", "type": "url", "url": "/g"},
+    }
+
+    stages = select_stages(catalog, "t")
+
+    assert list(stages) == ["request_context", "request_url"]

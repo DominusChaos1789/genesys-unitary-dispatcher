@@ -5,14 +5,16 @@ from dataclasses import dataclass
 
 BUCKET_NAMESPACE = "augusta-nexa"
 DEFAULT_CORE_CONFIG_KEY = "params/genesys/api/core.json"
+DEFAULT_DISPATCHER_CONFIG_KEY = "params/genesys/api/dispatcher.json"
 # Only the core.json groups that hold tagged endpoints. core.json also lists
 # daily/ondemand/actions files that this Lambda has no use for.
 DEFAULT_ENDPOINT_GROUPS = ("unitary", "status")
-# Tag + execution id in the key: Unitary Status and Unitary Download read the
-# payload back from here, so two flows running close together must never
-# overwrite each other's file.
+# Tag + execution id + organization id in the key: Unitary Status and Unitary
+# Download read the payload back from here, and each organization gets its
+# own flat file (see payload.build_organization_payload), so two flows or two
+# organizations running close together must never overwrite each other's file.
 DEFAULT_PAYLOAD_LOG_KEY_TEMPLATE = (
-    "transacciones/genesys/api/payload_request_unitary/{tag}/{execution_id}.json"
+    "transacciones/genesys/api/payload_request_unitary/{tag}/{execution_id}/{organization_id}.json"
 )
 # Every .json under this prefix is a contract, one per provider/operation pair.
 DEFAULT_CONTRACTS_PREFIX = "contracts/entrada/transacciones/empatia/transcripciones/"
@@ -50,6 +52,7 @@ class Settings:
     env: str
     resources_bucket: str
     core_config_key: str
+    dispatcher_config_key: str
     endpoint_groups: tuple[str, ...]
     payload_log_bucket: str
     payload_log_key_template: str
@@ -76,8 +79,10 @@ class Settings:
             return name
         return f"{BUCKET_NAMESPACE}-{self.env}-{name}"
 
-    def payload_log_key(self, tag: str, execution_id: str) -> str:
-        return self.payload_log_key_template.format(tag=tag, execution_id=execution_id)
+    def payload_log_key(self, tag: str, execution_id: str, organization_id: str) -> str:
+        return self.payload_log_key_template.format(
+            tag=tag, execution_id=execution_id, organization_id=organization_id
+        )
 
 
 def load_settings() -> Settings:
@@ -94,6 +99,7 @@ def load_settings() -> Settings:
         env=env,
         resources_bucket=bucket("RESOURCES_BUCKET", "resources"),
         core_config_key=os.environ.get("CORE_CONFIG_KEY", DEFAULT_CORE_CONFIG_KEY),
+        dispatcher_config_key=os.environ.get("DISPATCHER_CONFIG_KEY", DEFAULT_DISPATCHER_CONFIG_KEY),
         endpoint_groups=_split_csv(os.environ.get("ENDPOINT_GROUPS", ",".join(DEFAULT_ENDPOINT_GROUPS))),
         payload_log_bucket=bucket("PAYLOAD_LOG_BUCKET", "logs"),
         payload_log_key_template=os.environ.get("PAYLOAD_LOG_KEY_TEMPLATE", DEFAULT_PAYLOAD_LOG_KEY_TEMPLATE),

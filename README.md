@@ -1,9 +1,9 @@
 # genesys-unitary-dispatcher
 
 **Request Unitary** — the multi-tag dispatcher Lambda for Genesys Cloud. Each
-invocation runs one or more **tags** (workflows), builds one payload per tag
-with an entry per Genesys organization, writes it to the logs bucket and
-returns its location for the Step Function.
+invocation runs one or more **tags** (workflows) that [dispatcher.json](#dispatcherjson)
+allows, writes one flat payload file **per organization per tag** to the logs
+bucket, and returns a list of where each one went, for the Step Function.
 
 **How it works** — step-by-step logic, diagrams, token handling and failure
 behavior: [docs/how-it-works.md](docs/how-it-works.md).
@@ -24,26 +24,65 @@ EventBridge (event / scheduled) ──► Step Function ──► Request Unitar
 
 ## Flows
 
-A flow is defined entirely by tagging endpoints in the endpoint files that
-`core.json` references. An endpoint's `type` decides which stage it fills:
+A flow is defined by tagging endpoints in the endpoint files that `core.json`
+references. An endpoint's `type` decides which stage it fills:
 
 | type | stage | meaning |
 |---|---|---|
 | `unitary` | `request_context` | the direct call, or the initial listing |
 | `init` | `request_init` | starts an async job, returns a `jobId` |
 | `status` | `request_status` | polled until the job completes |
+| `url` | `request_url` | a follow-up call needing data the first call returned (e.g. transcripts: search finds a `communicationId`, then this fetches its download URL) |
 
 Current tags:
 
 | tag | stages | endpoints |
 |---|---|---|
 | `surveys` | `request_context` | `conversations_surveys` (GET, one call per conversation id, no polling) |
+| `transcripts` | `request_context` → `request_url` | `transcripts_search` (POST `/speechandtextanalytics/transcripts/search`), `transcripts_url` (GET `/speechandtextanalytics/conversations/{conversationId}/communications/{communicationId}/transcripturl` — `{communicationId}` only comes back from the search call, so it's left as a placeholder for Status/Download to fill once they have it) |
 | `funcionarios_adherencia` | `request_init` → `request_status` | `adherence_historical_init` (POST, one bulk job per management unit; no `userIds`, so it covers every user in the unit), `adherence_agent_status` |
 
-Adding a flow (e.g. the generic conversations extraction) means tagging its
-endpoints — no code change, as long as it has at most one endpoint per stage.
-A tagged endpoint whose `type` maps to no stage (e.g. `result`) is rejected
-rather than silently dropped.
+Adding a flow needs two things: tag its endpoints here (no code change, as
+long as it's built from stage types already in the table above), and add it
+to [dispatcher.json](#dispatcherjson) (enabled, its domain, its `id_kind`) —
+otherwise the tag exists in the catalog but the run refuses it. A tagged
+endpoint whose `type` maps to no stage (e.g. `result`) is rejected rather than
+silently dropped.
+
+## dispatcher.json
+
+`<resources bucket>/params/genesys/api/dispatcher.json` is the master switch
+for which tags may run and where their output goes — an S3 edit, not a
+deploy:
+
+```json
+{
+  "domains": {
+    "transacciones": {"output_base_path_key": "base_path"},
+    "funcionarios":  {"output_base_path_key": "base_path_wfm"}
+  },
+  "flows": {
+    "surveys":                 {"enabled": true, "domain": "transacciones", "id_kind": "conversation"},
+    "transcripts":              {"enabled": true, "domain": "transacciones", "id_kind": "conversation"},
+    "funcionarios_adherencia": {"enabled": true, "domain": "funcionarios",  "id_kind": "management_unit"}
+  }
+}
+```
+
+- **`enabled`** — a kill switch. A disabled or undeclared tag fails the run
+  before any ids are read, even if its endpoints are still tagged.
+- **`domain`** → **`output_base_path_key`** — which `config.output` key (SSM)
+  this tag's downloads are saved under; see [Payload](#payload).
+- **`id_kind`** — `"tags": "all"` expands to every *enabled* flow whose
+  `id_kind` is `"conversation"`. Adherence's `"management_unit"` keeps it out.
+
+This is config, not code: turning a flow on/off, moving it to a different
+domain, or adding a domain's output path is a `dispatcher.json` edit. Adding a
+genuinely new stage type (a new row in the Flows table above) still needs a
+code change in `endpoints.py`/`payload.py`; `dispatcher.json` only configures
+flows built from stage types the code already understands. Endpoint
+definitions (`unitary.json`/`status.json`) stay the only source of truth for
+URLs/methods/bodies — `dispatcher.json` never duplicates them.
 
 ## Event
 
@@ -78,12 +117,13 @@ drop an organization.
 ```
 
 `tags` runs several flows over the same ids: the ids are read once, each
-organization's token is requested once, and each tag gets its own payload file.
-`"all"` means every conversation flow, i.e. every tag with an endpoint whose URL
-contains `{conversationId}`. Flows keyed by other ids, like adherence
-(`{mu_id}`), are never included, and a new conversation flow joins `"all"` as
-soon as its endpoint is tagged. Every tag is validated before any ids are read.
-Send either `tag` or `tags`, not both.
+organization's token is requested once, and each (tag, organization) pair gets
+its own payload file. `"all"` means every **enabled** flow in
+[dispatcher.json](#dispatcherjson) whose `id_kind` is `"conversation"` —
+adherence's `"management_unit"` keeps it out, and a new conversation flow
+joins `"all"` as soon as it's declared there. Every tag is validated (declared,
+enabled, has endpoints) before any ids are read. Send either `tag` or `tags`,
+not both.
 
 ### Ids from the contracts process
 
@@ -115,37 +155,36 @@ An unknown `ids_source` value fails the run before any file is touched.
 
 ## Payload
 
+Each organization gets its own **flat** file — no `"organization"` array to
+unpack, so a Step Function can read one file straight into a Map state:
+
 ```json
 {
   "tag": "funcionarios_adherencia",
-  "organization": [
-    {
-      "organization_id": "org-1",
-      "ids": ["<management unit id>", "..."],
-      "request_init": {
-        "base_url": "https://api.sae1.pure.cloud",
-        "url": "/api/v2/workforcemanagement/adherence/historical/bulk",
-        "method": "POST",
-        "headers": {"Authorization": "Bearer <org-1 token>", "Content-Type": "application/json"},
-        "payload": {
-          "items": [{"managementUnitId": "{mu_id}", "startDate": "{star_date}", "endDate": "{end_date}",
-                     "includeExceptions": true, "includeActuals": true}],
-          "timeZone": "America/Bogota"
-        },
-        "type": "init", "path": "adherence_details", "result_data": "jobId",
-        "base_path": "funcionarios/genesys/api", "server_path": "org_id=1/"
-      },
-      "request_status": {"...": "...", "url": ".../bulk/jobs/{jobId}", "result_data": "status"}
-    }
-  ],
+  "organization_id": "org-1",
+  "ids": ["<management unit id>", "..."],
+  "request_init": {
+    "base_url": "https://api.sae1.pure.cloud",
+    "url": "/api/v2/workforcemanagement/adherence/historical/bulk",
+    "method": "POST",
+    "headers": {"Authorization": "Bearer <org-1 token>", "Content-Type": "application/json"},
+    "payload": {
+      "items": [{"managementUnitId": "{mu_id}", "startDate": "{star_date}", "endDate": "{end_date}",
+                 "includeExceptions": true, "includeActuals": true}],
+      "timeZone": "America/Bogota"
+    },
+    "type": "init", "path": "adherence_details", "result_data": "jobId",
+    "base_path": "funcionarios/genesys/api", "server_path": "org_id=1/"
+  },
+  "request_status": {"...": "...", "url": ".../bulk/jobs/{jobId}", "result_data": "status"},
   "failed_organizations": []
 }
 ```
 
 - Only the organization-specific parts are rendered: `base_url` (region) and
   the `Authorization` header (token). Per-id placeholders — `{conversationId}`,
-  `{mu_id}`, `{jobId}`, `{star_date}`, `{end_date}` — are left for
-  Status/Download to fill per call.
+  `{mu_id}`, `{jobId}`, `{communicationId}`, `{star_date}`, `{end_date}` — are
+  left for Status/Download to fill per call.
 - Every stage of an organization uses **that organization's** token and region.
 - `method`, `type`, `path`, `result_data` and the body come from the endpoint
   definition, so `request_init` is `POST` as `adherence_historical_init` says.
@@ -153,64 +192,66 @@ An unknown `ids_source` value fails the run before any file is touched.
   `payload`; the correct `body_template` spelling is accepted too.
   `params_template` becomes `params`.
 - `server_path` is the server's `relative_path` (`org_id=1/`).
-- `base_path` is the prefix the downloaded JSON is saved under, and it follows
-  the tag's **domain** (the tag's first segment):
-
-  | domain | config key | prefix |
-  |---|---|---|
-  | `funcionarios_*` (workforce management, e.g. adherence) | `config.output.base_path_wfm` | `funcionarios/genesys/api` |
-  | anything else — transacciones (surveys, conversations, ...) | `config.output.base_path` | `transacciones/genesys/api` |
-
-  A flow in a new domain needs an entry in `OUTPUT_BASE_PATH_KEY_BY_DOMAIN`
-  ([src/payload.py](src/payload.py)); a missing config key fails the run.
+- `base_path` is the prefix the downloaded JSON is saved under, resolved
+  through the tag's [dispatcher.json](#dispatcherjson) domain (`base_path` for
+  `transacciones`, `base_path_wfm` for `funcionarios`) — a missing config key
+  fails the run.
+- `failed_organizations` lists, with their ids, every organization that
+  couldn't be served in this run for this tag — see [Failures](#failures).
 
 ### Response
 
-The handler returns where the payload was written, never the payload itself (a
-day of conversations can exceed the Step Functions 256 KB state limit):
+The handler always returns a **list**, one entry per (tag, organization) pair
+that got a file — even a single-tag single-organization run — so a Step
+Function Map state can iterate it the same way regardless of how many tags or
+organizations were involved. It's where the payload was written, never the
+payload itself (a day of conversations can exceed the Step Functions 256 KB
+state limit):
 
 ```json
-{
-  "execution_id": "<Lambda request id>",
-  "bucket": "augusta-nexa-dev-logs",
-  "payload_location": "transacciones/genesys/api/payload_request_unitary/surveys/<execution_id>.json",
-  "stages": ["request_context"],
-  "failed_organizations": [{"organization_id": "org-9", "id_count": 12, "error": "no servers entry for org_9"}],
-  "tag": "surveys"
-}
+[
+  {
+    "execution_id": "<Lambda request id>",
+    "bucket": "augusta-nexa-dev-logs",
+    "payload_location": "transacciones/genesys/api/payload_request_unitary/surveys/<execution_id>/org-1.json",
+    "organization_id": "org-1",
+    "stages": ["request_context"],
+    "failed_organizations": [{"organization_id": "org-9", "id_count": 12, "error": "no servers entry for org_9"}],
+    "tag": "surveys"
+  }
+]
 ```
 
 - `payload_location` is the object key (prefix and file name) inside `bucket`.
-- An event with `tag` gets this object. An event with `tags` (a list or `"all"`)
-  gets a **list** of these objects, one per tag, even if the list has one tag,
-  so the shape depends on the event, not on how many tags ran.
-- `failed_organizations` gives an id count; the payload file lists their ids.
+- `failed_organizations` here gives an id **count**; the payload file (above)
+  lists the actual ids.
 - The detailed run summary (ids per organization, the contracts or
   conversations-download counts) is logged as `Run summary: {...}` in CloudWatch.
 
 ### Where it's written
 
-`s3://augusta-nexa-<env>-logs/transacciones/genesys/api/payload_request_unitary/<tag>/<execution_id>.json`
+`s3://augusta-nexa-<env>-logs/transacciones/genesys/api/payload_request_unitary/<tag>/<execution_id>/<organization_id>.json`
 
-The key includes the tag and the Lambda request id because Status and Download
-read the payload back: with one fixed key, a surveys run could overwrite an
-adherence payload that's still being processed. Pass each
-response's `bucket` + `payload_location` to the next states instead of
-rebuilding the key.
+The key includes the tag, the Lambda request id and the organization id
+because Status and Download read the payload back: with a key shared across
+organizations, two of them running close together would overwrite each
+other's file. Pass each response's `bucket` + `payload_location` to the next
+states instead of rebuilding the key.
 
 ### Failures
 
-- Unknown tag, or a misconfigured catalog → the invocation fails, **before**
-  any ids are read.
+- An unknown or disabled tag (not in `dispatcher.json`, or `enabled: false`),
+  a tag with no endpoints, both `tag` and `tags`, `tags` that isn't `"all"` or
+  a list of names, or `"all"` with no enabled conversation flow → the
+  invocation fails **before** any ids are read (or, for the contracts process,
+  before any source file is deleted).
 - An organization with no `servers` entry, or whose token can't be obtained →
-  left out of every payload. Each payload file lists it under
-  `failed_organizations` **with its ids**, and the response gives its
-  `id_count`; the other organizations still get entries. With the contracts
-  process the source files are already deleted at that point, so the payload
-  file is where those ids survive.
-- Both `tag` and `tags`, `tags` that isn't `"all"` or a list of names, or
-  `"all"` with no conversation flow in the catalog → the invocation fails.
-- No ids at all → an empty payload is still written, and Genesys isn't called.
+  gets **no payload file at all**, for any tag. Every other organization's
+  file for that tag lists it under `failed_organizations` **with its ids**,
+  and the response gives its `id_count`. With the contracts process the
+  source files are already deleted at that point, so the payload file is
+  where those ids survive.
+- No ids at all → no payload files are written, and Genesys isn't called.
 
 ## Contracts process
 
@@ -265,9 +306,10 @@ All optional.
 | `ENV_PREFIX` → `ENVIRONMENT` → `PROFILE` → `STACK_ID` | `dev` | Environment token (`dev`/`stg`/`pro`), first one set wins. The pipeline sets `ENVIRONMENT`/`STACK_ID`, not `ENV_PREFIX`. |
 | `RESOURCES_BUCKET` | `augusta-nexa-<env>-resources` | Holds `core.json` and the endpoint files. Logical or full name. |
 | `CORE_CONFIG_KEY` | `params/genesys/api/core.json` | Endpoint catalog. |
+| `DISPATCHER_CONFIG_KEY` | `params/genesys/api/dispatcher.json` | The [flow allowlist/domain config](#dispatcherjson). |
 | `ENDPOINT_GROUPS` | `unitary,status` | Which `core.json` groups to load. Others (daily/ondemand/actions) are never read. |
 | `PAYLOAD_LOG_BUCKET` | `augusta-nexa-<env>-logs` | Logical or full name. |
-| `PAYLOAD_LOG_KEY_TEMPLATE` | `transacciones/genesys/api/payload_request_unitary/{tag}/{execution_id}.json` | |
+| `PAYLOAD_LOG_KEY_TEMPLATE` | `transacciones/genesys/api/payload_request_unitary/{tag}/{execution_id}/{organization_id}.json` | Must keep `{organization_id}` unique per organization, or two of them will overwrite each other's file. |
 | `API_GENESYS_PARAMS` | `/augusta-nexa-<env>/genesys/api` | SSM path for `connection`/`servers`/`config`; OAuth secrets share the prefix. |
 | `REGION` | `us-east-2` | SSM / Secrets Manager region. |
 | `RESOURCE_NAME` | `augusta-nexa-<env>-genesys-api-unitary-request` | Name in the runtime-control log (token cache). |

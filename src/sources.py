@@ -39,12 +39,6 @@ def _tag_source(event: dict) -> dict:
     return event if ("tag" in event or "tags" in event) else (event.get("detail") or {})
 
 
-def selects_tag_list(event: dict) -> bool:
-    """Whether the event asked for `tags` (a list or "all") rather than one `tag`.
-    Decides the response shape, so it depends on the event, not the tag count."""
-    return "tags" in _tag_source(event)
-
-
 def resolve_tag_selection(event: dict) -> list[str] | str:
     """The tags to run, in order and without repeats -- or ALL_TAGS.
 
