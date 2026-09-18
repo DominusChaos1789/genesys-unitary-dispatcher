@@ -1,7 +1,7 @@
 {
-    "conversations_surveys": {
+    "conversations_surveys_result": {
         "tag": "surveys",
-        "url": "/api/v2/quality/conversations/{conversationId}/surveys",
+        "url": "/api/v2/quality/surveys/{surveyId}",
         "type": "unitary",
         "method": "GET",
         "path": "conversations_surveys",
@@ -33,26 +33,6 @@
             "timeZone": "America/Bogota"
         },
         "result_data": "jobId"
-    },
-    "transcripts_search": {
-        "tag": "transcripts",
-        "url": "/api/v2/speechandtextanalytics/transcripts/search",
-        "type": "unitary",
-        "method": "POST",
-        "path": "transcripts_search",
-        "body_templante": {
-            "pageSize": "{page_size}",
-            "pageNumber": "{page_number}",
-            "interval": "{time_intervals}",
-            "types": ["transcripts"],
-            "query": [
-                {"type": "EXACT", "fields": ["mediaType"], "value": "call"},
-                {"type": "EXACT", "fields": ["language"], "value": "es-us"},
-                {"type": "EXACT", "fields": ["divisionId"], "value": "{divisionId}"}
-            ],
-            "returnFields": ["conversationId", "communicationId"]
-        },
-        "result_data": "state"
     },
     "transcripts_url": {
         "tag": "transcripts",

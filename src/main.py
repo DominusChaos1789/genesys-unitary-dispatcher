@@ -8,16 +8,16 @@ gets ids for a tag gets its own flat payload file with a request template for
 every stage of that flow (payload.py):
 
     surveys                  -> request_context
-    transcripts              -> request_context, request_url
+    transcripts              -> request_url
     funcionarios_adherencia  -> request_init, request_status (one job per management unit)
 
 `"tags": [...]` runs several flows over their own ids, and `"tags": "all"` runs
-every enabled flow whose dispatcher.json id_kind is "conversation" or
-"division" (dispatcher_config.py). Ids are resolved once per distinct id_kind
-among the tags requested -- not once overall -- since a "division" tag like
-transcripts needs different ids from a "conversation" tag like surveys even
-in the same run; each organization's token is still requested once however
-many tags/kinds run.
+every enabled flow whose dispatcher.json id_kind is "conversation", "survey"
+or "transcript_session" (dispatcher_config.py). Ids are resolved once per
+distinct id_kind among the tags requested -- not once overall -- since a
+"survey" tag like surveys needs different ids from a "transcript_session" tag
+like transcripts even in the same run; each organization's token is still
+requested once however many tags/kinds run.
 
 Ids sources:
 - none: the ids come in the event, inline or as an S3 file (sources.py);
@@ -26,9 +26,9 @@ Ids sources:
   conversation ids grouped by each contract's organization (contracts_process.py).
 - "conversations_details": ids the Genesys conversations download left in the
   landing bucket for the event's `date`, grouped by their org_id= folder --
-  either the conversation ids themselves, or the divisionIds recorded on those
-  same conversations, depending on the tag's id_kind (conversations_details.py).
-  Those files are left untouched.
+  Finished surveyIds, (conversationId, communicationId) session pairs, or the
+  conversation ids themselves, depending on the tag's id_kind
+  (conversations_details.py). Those files are left untouched.
 
 Each organization's payload is written to the logs bucket under its tag and
 its own organization id -- one flat file, no "organization" array, at a fixed
@@ -53,9 +53,15 @@ import boto3
 
 import src.s3_utils as s3_utils
 from src.config import Settings, load_settings
-from src.conversations_details import collect_conversation_ids, collect_division_ids, parse_date
+from src.conversations_details import (
+    collect_conversation_ids,
+    collect_survey_ids,
+    collect_transcript_session_ids,
+    parse_date,
+)
 from src.dispatcher_config import (
-    DIVISION_ID_KIND,
+    SURVEY_ID_KIND,
+    TRANSCRIPT_SESSION_ID_KIND,
     conversation_tags,
     flow_config,
     flow_id_kind,
@@ -85,7 +91,10 @@ def _expand_tags(selection: list[str] | str, dispatcher: dict) -> list[str]:
         return selection
     tags = conversation_tags(dispatcher)
     if not tags:
-        raise EventError('"tags": "all" found no enabled flow with id_kind "conversation" or "division"')
+        raise EventError(
+            '"tags": "all" found no enabled flow with id_kind '
+            '"conversation", "survey" or "transcript_session"'
+        )
     return tags
 
 
@@ -108,8 +117,10 @@ def _resolve_ids(s3_client, settings: Settings, event: dict, execution_id: str, 
         outcome = run_contracts(s3_client, settings, execution_id)
     elif ids_source == CONVERSATIONS_DETAILS_IDS_SOURCE:
         day = parse_date(event.get("date"))
-        if id_kind == DIVISION_ID_KIND:
-            outcome = collect_division_ids(s3_client, settings, day)
+        if id_kind == SURVEY_ID_KIND:
+            outcome = collect_survey_ids(s3_client, settings, day)
+        elif id_kind == TRANSCRIPT_SESSION_ID_KIND:
+            outcome = collect_transcript_session_ids(s3_client, settings, day)
         else:
             outcome = collect_conversation_ids(s3_client, settings, day)
     else:
@@ -121,11 +132,11 @@ def _resolve_ids_by_kind(s3_client, settings: Settings, event: dict, execution_i
     """({id_kind: ids by organization}, {id_kind: source summary}).
 
     Ids are resolved once per distinct id_kind among the tags requested (e.g.
-    "tags": "all" mixes "conversation" tags like surveys with "division" tags
-    like transcripts, which need different ids from the same conversations_details
-    day). Without `ids_source`, the event supplies one set of ids that's used
-    for every kind -- the event author is responsible for sending ids that fit
-    whatever tag(s) they asked for.
+    "tags": "all" mixes "survey" tags like surveys with "transcript_session"
+    tags like transcripts, which need different ids from the same
+    conversations_details day). Without `ids_source`, the event supplies one
+    set of ids that's used for every kind -- the event author is responsible
+    for sending ids that fit whatever tag(s) they asked for.
     """
     ids_by_kind: dict[str, dict[str, list[str]]] = {}
     summaries_by_kind: dict[str, dict] = {}
@@ -135,6 +146,17 @@ def _resolve_ids_by_kind(s3_client, settings: Settings, event: dict, execution_i
         if summary is not None:
             summaries_by_kind[id_kind] = summary
     return ids_by_kind, summaries_by_kind
+
+
+def _combined_ids(ids_by_kind: dict[str, dict[str, list]], organization_id: str) -> list:
+    """Every id an organization has across every id_kind, only to report a
+    failure so a re-run has them. Ids are opaque here -- plain strings for
+    most kinds, {conversationId, communicationId} pairs for
+    "transcript_session" -- so this doesn't dedupe or sort across kinds."""
+    combined: list = []
+    for ids in ids_by_kind.values():
+        combined.extend(ids.get(organization_id, []))
+    return combined
 
 
 def _build_organizations(
@@ -147,11 +169,11 @@ def _build_organizations(
     """({tag: organization entries}, failed organizations).
 
     One token per organization for all tags, but each tag draws its ids from
-    its own id_kind -- a "division" tag like transcripts and a "conversation"
-    tag like surveys never share an ids list. An organization with a token
-    failure is failed for every tag; one with no ids for a given tag's kind
-    (e.g. no transcript divisions that day) simply gets no file for that tag,
-    not a failure.
+    its own id_kind -- a "transcript_session" tag like transcripts and a
+    "survey" tag like surveys never share an ids list. An organization with a
+    token failure is failed for every tag; one with no ids for a given tag's
+    kind (e.g. no finished surveys that day) simply gets no file for that
+    tag, not a failure.
     """
     organizations: dict[str, list[dict]] = {tag: [] for tag in stages_by_tag}
     all_organization_ids = sorted({org for ids in ids_by_kind.values() for org in ids})
@@ -171,12 +193,11 @@ def _build_organizations(
 
     for organization_id in all_organization_ids:
         server = config["servers"].get(_server_key(organization_id))
-        # Every id this organization has, across kinds, only to report a failure.
-        organization_ids = sorted({i for ids in ids_by_kind.values() for i in ids.get(organization_id, [])})
         if server is None:
             logger.error("No 'servers' entry for organization %s", organization_id)
             error = f"no servers entry for {_server_key(organization_id)}"
-            failed.append({"organization_id": organization_id, "ids": organization_ids, "error": error})
+            ids = _combined_ids(ids_by_kind, organization_id)
+            failed.append({"organization_id": organization_id, "ids": ids, "error": error})
             continue
 
         try:
@@ -199,7 +220,8 @@ def _build_organizations(
                 )
         except Exception as exc:  # noqa: BLE001 -- one organization must not stop the rest
             logger.exception("Could not build the payload for organization %s", organization_id)
-            failed.append({"organization_id": organization_id, "ids": organization_ids, "error": str(exc)})
+            ids = _combined_ids(ids_by_kind, organization_id)
+            failed.append({"organization_id": organization_id, "ids": ids, "error": str(exc)})
             continue
 
         for tag, entry in entries.items():

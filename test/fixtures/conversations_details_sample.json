@@ -8,6 +8,10 @@
                 "00000000-0000-4000-8000-000000000099"
             ],
             "originatingDirection": "outbound",
+            "surveys": [
+                {"surveyId": "6750faad-0130-4a68-8b43-be6a768ef46b", "surveyStatus": "Finished"},
+                {"surveyId": "9c8b6a4f-0000-4a68-8b43-be6a768ef000", "surveyStatus": "Expired"}
+            ],
             "participants": [
                 {
                     "participantId": "00000000-0000-4000-8000-000000000011",
@@ -37,6 +41,9 @@
             "conversationId": "0c1d2e3f-1111-4aaa-8bbb-000000000002",
             "conversationStart": "2026-08-12T22:03:02.500Z",
             "originatingDirection": "inbound",
+            "surveys": [
+                {"surveyId": "af6e3a10-0000-4a68-8b43-be6a768ef001", "surveyStatus": "Finished"}
+            ],
             "participants": [
                 {
                     "participantId": "00000000-0000-4000-8000-000000000012",

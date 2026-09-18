@@ -89,7 +89,7 @@ def test_surveys_writes_one_flat_file_per_organization(aws, genesys_api):
         "request_context": {
             "base_url": "https://api.usw2.pure.cloud",
             # Left unrendered: the id is substituted downstream, per call.
-            "url": "/api/v2/quality/conversations/{conversationId}/surveys",
+            "url": "/api/v2/quality/surveys/{surveyId}",
             "method": "GET",
             "headers": {"Authorization": "Bearer token-for-org-3", "Content-Type": "application/json"},
             "type": "unitary",
@@ -151,17 +151,16 @@ def test_adherence_is_one_job_per_management_unit(aws):
     assert status["result_data"] == "status"
 
 
-def test_transcripts_is_search_then_url(aws):
+def test_transcripts_is_a_single_url_call(aws):
+    pair = {"conversationId": "conv-1", "communicationId": "comm-1"}
     result = run(
-        {"tag": "transcripts", "organizations": [{"organization_id": "org-1", "ids": ["conv-1"]}]}, _context()
+        {"tag": "transcripts", "organizations": [{"organization_id": "org-1", "ids": [pair]}]}, _context()
     )
 
-    assert responses_for(result)[0]["stages"] == ["request_context", "request_url"]
+    assert responses_for(result)[0]["stages"] == ["request_url"]
     entry = read_payload(result)
-    search = entry["request_context"]
-    assert search["url"] == "/api/v2/speechandtextanalytics/transcripts/search"
-    assert search["method"] == "POST"
-    assert search["type"] == "unitary"
+    assert entry["ids"] == [pair]
+    assert "request_context" not in entry
 
     url_stage = entry["request_url"]
     assert url_stage["url"].startswith(
@@ -169,7 +168,9 @@ def test_transcripts_is_search_then_url(aws):
     )
     assert url_stage["url"].endswith("/transcripturl")
     assert url_stage["type"] == "url"
-    # communicationId only comes from the search result, so it stays a placeholder.
+    assert url_stage["method"] == "GET"
+    # Both ids come from entry["ids"] itself now -- no preceding search call.
+    assert "{conversationId}" in url_stage["url"]
     assert "{communicationId}" in url_stage["url"]
 
 
@@ -264,7 +265,7 @@ def test_several_tags_share_the_ids_and_one_token_per_organization(aws, genesys_
     ]
     surveys = payload_by_org(result, "surveys")["org-3"]
     recordings = payload_by_org(result, "recordings")["org-3"]
-    assert surveys["request_context"]["url"] == "/api/v2/quality/conversations/{conversationId}/surveys"
+    assert surveys["request_context"]["url"] == "/api/v2/quality/surveys/{surveyId}"
     assert recordings["request_context"]["url"] == "/api/v2/conversations/{conversationId}/recordings"
     assert recordings["ids"] == surveys["ids"] == ["conv-3a", "conv-3b"]
     # Two tags, two organizations: one config load and one token per organization.
@@ -300,10 +301,13 @@ def test_all_tags_without_any_conversation_flow_is_an_error(aws):
 
     config = json.loads(s3.get_object(Bucket=RESOURCES_BUCKET, Key=DISPATCHER_CONFIG_KEY)["Body"].read())
     for flow in config["flows"].values():
-        flow["enabled"] = flow.get("id_kind") not in ("conversation", "division")
+        flow["enabled"] = flow.get("id_kind") not in ("conversation", "survey", "transcript_session")
     s3.put_object(Bucket=RESOURCES_BUCKET, Key=DISPATCHER_CONFIG_KEY, Body=json.dumps(config))
 
-    with pytest.raises(EventError, match='found no enabled flow with id_kind "conversation" or "division"'):
+    with pytest.raises(
+        EventError,
+        match='found no enabled flow with id_kind "conversation", "survey" or "transcript_session"',
+    ):
         run({"tags": "all", "organizations": TWO_ORGS}, _context())
 
 
@@ -394,14 +398,17 @@ def test_a_failing_organization_gets_no_file_in_any_tag(aws, monkeypatch):
 
     result = run({"tags": ["surveys", "recordings"], "organizations": TWO_ORGS}, _context())
 
+    # surveys ("survey" id_kind) and recordings ("conversation" id_kind) each
+    # draw their own copy of org-1's inline id, so the combined failure list
+    # (across kinds, not deduplicated) counts it twice.
     assert result["failed_organizations"] == [
-        {"organization_id": "org-1", "id_count": 1, "error": "oauth down for org-1"}
+        {"organization_id": "org-1", "id_count": 2, "error": "oauth down for org-1"}
     ]
     for tag in ("surveys", "recordings"):
         by_org = payload_by_org(result, tag)
         assert list(by_org) == ["org-3"]
         assert by_org["org-3"]["failed_organizations"] == [
-            {"organization_id": "org-1", "ids": ["conv-1a"], "error": "oauth down for org-1"}
+            {"organization_id": "org-1", "ids": ["conv-1a", "conv-1a"], "error": "oauth down for org-1"}
         ]
 
 

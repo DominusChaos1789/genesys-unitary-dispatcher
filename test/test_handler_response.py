@@ -87,7 +87,7 @@ def test_the_payload_file_is_flat_with_no_organization_array(aws):
     assert set(written) == {"tag", "organization_id", "ids", "request_context", "failed_organizations"}
     assert written["organization_id"] == "org-1"
     assert written["ids"] == ["conv-1"]
-    assert written["request_context"]["url"] == "/api/v2/quality/conversations/{conversationId}/surveys"
+    assert written["request_context"]["url"] == "/api/v2/quality/surveys/{surveyId}"
 
 
 def test_tags_produce_a_response_entry_per_tag_and_organization(aws):

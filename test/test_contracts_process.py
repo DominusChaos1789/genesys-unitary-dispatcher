@@ -102,7 +102,7 @@ def test_contracts_run_writes_parquet_deletes_sources_and_builds_the_surveys_pay
     assert list(_by_org(result)) == ["org-3"]
     entry = _by_org(result)["org-3"]
     assert entry["ids"] == sorted(BDO_IDS)
-    assert entry["request_context"]["url"] == "/api/v2/quality/conversations/{conversationId}/surveys"
+    assert entry["request_context"]["url"] == "/api/v2/quality/surveys/{surveyId}"
     assert entry["request_context"]["headers"]["Authorization"] == "Bearer token-for-org-3"
     assert entry["request_context"]["base_path"] == GENESYS_BASE_PATH
 

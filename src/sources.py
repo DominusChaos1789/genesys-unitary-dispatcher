@@ -16,6 +16,8 @@ bucket and key come from `detail`, and the tag(s) from the top level or from
 organizations list, bare or as {"organizations": [...]}.
 """
 
+import json
+
 import src.s3_utils as s3_utils
 from src.config import Settings
 
@@ -69,25 +71,39 @@ def _ids_location(event: dict) -> tuple[str, str] | None:
     return None
 
 
-def _group(organizations) -> dict[str, list[str]]:
-    """{organization_id: sorted unique ids}. Repeated organizations merge;
+def _sort_key(item):
+    """Ids are usually plain strings, but a "transcript_session" tag's ids
+    are {conversationId, communicationId} objects -- not hashable or
+    orderable on their own, so dicts sort by their JSON form instead."""
+    return item if isinstance(item, str) else json.dumps(item, sort_keys=True)
+
+
+def _group(organizations) -> dict[str, list]:
+    """{organization_id: unique ids, sorted}. Repeated organizations merge;
     organizations left with no ids are dropped."""
     if isinstance(organizations, dict):
         organizations = organizations.get("organizations", [])
 
-    grouped: dict[str, set[str]] = {}
+    grouped: dict[str, list] = {}
+    seen: dict[str, set] = {}
     for entry in organizations:
         organization_id = entry.get("organization_id")
         if not organization_id:
             raise EventError(f"Organization entry without 'organization_id': {entry!r}")
         if "ids" not in entry:
             raise EventError(f"Organization {organization_id!r} has no 'ids' list")
-        grouped.setdefault(organization_id, set()).update(entry["ids"])
+        ids = grouped.setdefault(organization_id, [])
+        seen_keys = seen.setdefault(organization_id, set())
+        for item in entry["ids"]:
+            key = _sort_key(item)
+            if key not in seen_keys:
+                seen_keys.add(key)
+                ids.append(item)
 
-    return {organization_id: sorted(ids) for organization_id, ids in grouped.items() if ids}
+    return {organization_id: sorted(ids, key=_sort_key) for organization_id, ids in grouped.items() if ids}
 
 
-def resolve_ids_by_organization(s3_client, settings: Settings, event: dict) -> dict[str, list[str]]:
+def resolve_ids_by_organization(s3_client, settings: Settings, event: dict) -> dict[str, list]:
     if "organizations" in event:
         return _group(event["organizations"])
 

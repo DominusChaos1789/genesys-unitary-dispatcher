@@ -1,4 +1,4 @@
-"""Conversation ids from the Genesys conversations download.
+"""Ids from the Genesys conversations download.
 
 A separate process downloads conversation details from Genesys Cloud into the
 landing bucket, one folder per organization and day:
@@ -6,22 +6,31 @@ landing bucket, one folder per organization and day:
     augusta-nexa-<env>-landing/transacciones/genesys/api/conversations_details/
         org_id=<N>/year=YYYY/month=MM/day=DD/conversations_details_<...>.json
 
-Each file is {"endpoint": [{"conversationId": ..., "divisionIds": [...],
+Each file is {"endpoint": [{"conversationId": ..., "surveys": [...],
 "participants": [...], ...}, ...]}. For a run with `"ids_source":
 "conversations_details"` and `"date": "YYYY-MM-DD"`, this reads that day's
-files for every organization and collects ids -- either the conversation ids
-themselves (`collect_conversation_ids`, for "conversation" id_kind flows like
-surveys) or the divisionIds recorded on those same conversations
-(`collect_division_ids`, for "division" id_kind flows like transcripts, whose
-search endpoint filters by division rather than by conversation). Unlike the
-contracts process there is nothing to transform or write: the ids only feed
-the payload. The files belong to the download process, so they are never
-modified or deleted here.
+files for every organization and collects ids -- which field depends on the
+tag's id_kind:
+
+- "survey" (surveys): each conversation's `surveys[]` entries with
+  `surveyStatus == "Finished"`, by their `surveyId` -- Unitary consumes
+  `conversations_surveys_result` (`/api/v2/quality/surveys/{surveyId}`), not
+  the conversation itself.
+- "transcript_session" (transcripts): one (conversationId, communicationId)
+  pair per participant session on the conversation -- a single conversation
+  can have several, since `transcripts_url`
+  (`/api/v2/speechandtextanalytics/conversations/{conversationId}/communications/{communicationId}/transcripturl`)
+  needs both ids and a conversation can carry more than one communication.
+
+Unlike the contracts process there is nothing to transform or write: the ids
+only feed the payload. The files belong to the download process, so they are
+never modified or deleted here.
 """
 
 import logging
 import re
 from datetime import date, datetime
+from typing import Callable
 
 import src.s3_utils as s3_utils
 from src.config import Settings
@@ -48,34 +57,62 @@ def organization_id_from_folder(folder: str) -> str | None:
     return f"org-{match.group(1)}" if match else None
 
 
+def _conversations(document) -> list[dict]:
+    conversations = document.get(CONVERSATIONS_KEY) if isinstance(document, dict) else None
+    if not isinstance(conversations, list):
+        raise ValueError(f"expected an object with an {CONVERSATIONS_KEY!r} list")
+    return conversations
+
+
 def _conversation_ids(document) -> list[str]:
-    conversations = document.get(CONVERSATIONS_KEY) if isinstance(document, dict) else None
-    if not isinstance(conversations, list):
-        raise ValueError(f"expected an object with an {CONVERSATIONS_KEY!r} list")
-    return [c["conversationId"] for c in conversations if isinstance(c, dict) and c.get("conversationId")]
-
-
-def _division_ids(document) -> list[str]:
-    conversations = document.get(CONVERSATIONS_KEY) if isinstance(document, dict) else None
-    if not isinstance(conversations, list):
-        raise ValueError(f"expected an object with an {CONVERSATIONS_KEY!r} list")
     return [
-        division_id
-        for c in conversations
-        if isinstance(c, dict)
-        for division_id in (c.get("divisionIds") or [])
+        c["conversationId"]
+        for c in _conversations(document)
+        if isinstance(c, dict) and c.get("conversationId")
     ]
 
 
-def _collect_ids(s3_client, settings: Settings, day: date, extractor, label: str) -> dict:
-    """The day's ids (as picked out by `extractor`) grouped by organization,
-    plus a summary for the Lambda's response. Files are read one at a time,
-    keeping only the ids."""
+def _survey_ids(document) -> list[str]:
+    """Finished surveys' surveyId, off every conversation's `surveys[]`."""
+    return [
+        survey["surveyId"]
+        for c in _conversations(document)
+        if isinstance(c, dict)
+        for survey in (c.get("surveys") or [])
+        if isinstance(survey, dict) and survey.get("surveyStatus") == "Finished" and survey.get("surveyId")
+    ]
+
+
+def _transcript_session_pairs(document) -> list[tuple[str, str]]:
+    """One (conversationId, sessionId) pair per participant session -- a
+    conversation with several communications yields several pairs."""
+    pairs = []
+    for c in _conversations(document):
+        if not isinstance(c, dict) or not c.get("conversationId"):
+            continue
+        for participant in c.get("participants") or []:
+            if not isinstance(participant, dict):
+                continue
+            for session in participant.get("sessions") or []:
+                if isinstance(session, dict) and session.get("sessionId"):
+                    pairs.append((c["conversationId"], session["sessionId"]))
+    return pairs
+
+
+def _collect_ids(
+    s3_client, settings: Settings, day: date, extractor: Callable, label: str, render: Callable = lambda x: x
+) -> dict:
+    """The day's ids (as picked out by `extractor`, deduplicated as whatever
+    hashable value it returns) grouped by organization, plus a summary for
+    the Lambda's response. `render` turns each deduplicated item into the
+    value that actually goes in `ids_by_organization` -- identity for plain
+    ids, tuple-to-dict for pairs. Files are read one at a time, keeping only
+    the ids."""
     bucket = settings.conversations_details_bucket
     prefix = settings.conversations_details_prefix.rstrip("/") + "/"
     day_path = f"year={day.year:04d}/month={day.month:02d}/day={day.day:02d}/"
 
-    grouped: dict[str, set[str]] = {}
+    grouped: dict[str, set] = {}
     files_read = 0
     skipped: list[str] = []
 
@@ -94,7 +131,7 @@ def _collect_ids(s3_client, settings: Settings, day: date, extractor, label: str
             files_read += 1
             grouped.setdefault(organization_id, set()).update(ids)
 
-    ids_by_organization = {org: sorted(ids) for org, ids in grouped.items() if ids}
+    ids_by_organization = {org: [render(item) for item in sorted(ids)] for org, ids in grouped.items() if ids}
     logger.info(
         "Read %d conversations file(s) for %s (%s): %s",
         files_read,
@@ -115,12 +152,25 @@ def _collect_ids(s3_client, settings: Settings, day: date, extractor, label: str
 
 
 def collect_conversation_ids(s3_client, settings: Settings, day: date) -> dict:
-    """The day's conversation ids grouped by organization -- for "conversation"
-    id_kind flows (surveys)."""
+    """The day's conversation ids grouped by organization -- for the generic
+    "conversation" id_kind."""
     return _collect_ids(s3_client, settings, day, _conversation_ids, "conversationId")
 
 
-def collect_division_ids(s3_client, settings: Settings, day: date) -> dict:
-    """The day's divisionIds (read off the same conversation records) grouped
-    by organization -- for "division" id_kind flows (transcripts)."""
-    return _collect_ids(s3_client, settings, day, _division_ids, "divisionIds")
+def collect_survey_ids(s3_client, settings: Settings, day: date) -> dict:
+    """The day's Finished surveyIds grouped by organization -- for "survey"
+    id_kind flows (surveys)."""
+    return _collect_ids(s3_client, settings, day, _survey_ids, "surveyId")
+
+
+def collect_transcript_session_ids(s3_client, settings: Settings, day: date) -> dict:
+    """The day's (conversationId, communicationId) pairs grouped by
+    organization -- for "transcript_session" id_kind flows (transcripts)."""
+    return _collect_ids(
+        s3_client,
+        settings,
+        day,
+        _transcript_session_pairs,
+        "conversationId+communicationId",
+        render=lambda pair: {"conversationId": pair[0], "communicationId": pair[1]},
+    )

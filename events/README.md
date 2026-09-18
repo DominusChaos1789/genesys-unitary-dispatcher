@@ -29,14 +29,14 @@ that got a payload file — even for these single-organization events.
 |---|---|---|---|
 | `01-smoke-empty` | surveys with no ids | writes nothing to logs; **no Genesys or SSM calls** | empty list `[]` |
 | `10`–`14` `err-*` | invalid events (see below) | none | the run fails with the error below |
-| `02-surveys-inline` | surveys for one conversation id sent in the event | reads SSM/Secrets, gets org-1's token, writes the payload | list of 1: `org-1`'s file has 1 id |
-| `03-surveys-conv-details` | surveys for every conversation downloaded on 2026-08-13 | reads the landing files (never deletes them) | list with one entry per `org_id=` folder with files that day |
+| `02-surveys-inline` | surveys for one surveyId sent in the event | reads SSM/Secrets, gets org-1's token, writes the payload | list of 1: `org-1`'s file has 1 id |
+| `03-surveys-conv-details` | surveys for every Finished survey downloaded on 2026-08-13 | reads the landing files (never deletes them) | list with one entry per `org_id=` folder with files that day |
 | `04-tags-list` | same, with `tags` as a list | same as 03 | same as 03 (still one flow, `surveys`) |
-| `05-tags-all` | every enabled `conversation`/`division` flow (dispatcher.json) for 2026-08-13 | same as 03, one file per (flow, organization); `transcripts` reads divisionIds off the same day's files, not conversation ids | list with one entry per flow × organization (today `surveys` and `transcripts`) |
+| `05-tags-all` | every enabled `conversation`/`survey`/`transcript_session` flow (dispatcher.json) for 2026-08-13 | same as 03, one file per (flow, organization); `transcripts` reads `{conversationId, communicationId}` pairs off the same day's files, not surveyIds | list with one entry per flow × organization (today `surveys` and `transcripts`) |
 | `07-adherence-inline` | adherence for one management unit sent in the event | token + payload | list of 1: `stages: ["request_init", "request_status"]` |
 | `08-adherence-s3-file` | adherence for the units listed in an S3 file | reads the file | same as 07 |
 | `09-eventbridge-s3` | the S3 "Object Created" event EventBridge would send for that file | reads the file | same as 07 |
-| `15-transcripts-inline` | transcripts for one divisionId sent in the event | token + payload | list of 1: `stages: ["request_context", "request_url"]` |
+| `15-transcripts-inline` | transcripts for one `{conversationId, communicationId}` pair sent in the event | token + payload | list of 1: `stages: ["request_url"]` |
 | `06-surveys-contracts` | the hourly contracts process, then surveys | ⚠️ **writes parquet to refined and deletes the processed transcription files in providers-landing** | list with one entry per contract's organization; contract counts are in the `Run summary` log line |
 
 Every successful run writes one **flat** file per (tag, organization) pair to a
@@ -49,17 +49,18 @@ the `Run summary` log line for the per-organization counts.
 
 ### Before running
 
-- **`02`**: `00000000-0000-4000-8000-000000000001` is a placeholder. Replace it
-  with a real `conversationId` from a landing file if Status/Download will act on
-  the payload.
+- **`02`**: `00000000-0000-4000-8000-000000000001` is a placeholder standing
+  in for a Finished `surveyId`. Replace it with a real one from a landing
+  file if Status/Download will act on the payload.
 - **`03`–`05`**: change `date` to a day that has files under
   `augusta-nexa-dev-landing/transacciones/genesys/api/conversations_details/org_id=<N>/year=/month=/day=/`.
   A full day is dozens of files per organization; if the run times out, raise the
   function timeout (dev is 60 s) before reading anything into the result.
 - **`07`**: replace `REPLACE_WITH_MU_ID` with a real management unit id.
-- **`15`**: `00000000-0000-4000-8000-000000000001` is a placeholder standing in
-  for a divisionId (transcripts' `id_kind` is `"division"`, not
-  `"conversation"` like `02`'s).
+- **`15`**: its `ids` entry is a `{conversationId, communicationId}` object,
+  not a plain string (transcripts' `id_kind` is `"transcript_session"`) --
+  replace both with real ids from a landing file if Status/Download will act
+  on the payload.
 - **`08`, `09`**: upload the units file first (edit its id too). The key is an
   example; use wherever the 2 a.m. process actually writes it:
 

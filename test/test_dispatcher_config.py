@@ -18,8 +18,8 @@ CONFIG = {
         "funcionarios": {"output_base_path_key": "base_path_wfm"},
     },
     "flows": {
-        "surveys": {"enabled": True, "domain": "transacciones", "id_kind": "conversation"},
-        "transcripts": {"enabled": True, "domain": "transacciones", "id_kind": "conversation"},
+        "surveys": {"enabled": True, "domain": "transacciones", "id_kind": "survey"},
+        "transcripts": {"enabled": True, "domain": "transacciones", "id_kind": "transcript_session"},
         "funcionarios_adherencia": {"enabled": True, "domain": "funcionarios", "id_kind": "management_unit"},
         "retired_flow": {"enabled": False, "domain": "transacciones", "id_kind": "conversation"},
     },
@@ -75,6 +75,7 @@ def test_output_base_path_key_follows_the_flows_domain():
     assert output_base_path_key(CONFIG, "funcionarios_adherencia") == "base_path_wfm"
 
 
-def test_conversation_tags_are_every_enabled_conversation_id_kind_flow():
+def test_conversation_tags_are_every_enabled_conversations_details_flow():
     # retired_flow is id_kind "conversation" but disabled, so it's excluded.
+    # surveys ("survey") and transcripts ("transcript_session") both count too.
     assert conversation_tags(CONFIG) == ["surveys", "transcripts"]

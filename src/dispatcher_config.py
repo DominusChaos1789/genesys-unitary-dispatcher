@@ -5,16 +5,20 @@ whether it's enabled, which output *domain* it belongs to (which SSM
 `config.output` key its downloads are saved under), and its `id_kind` (what
 kind of id feeds it):
 
-- "conversation": the ids are conversation ids themselves (surveys).
-- "division": the ids are the divisionIds recorded on those same
-  conversations, not the conversation ids (transcripts -- its search endpoint
-  filters by division, not by conversation).
+- "conversation": the ids are conversation ids themselves.
+- "survey": the ids are Finished surveyIds read off those same conversations'
+  `surveys[]` (surveys) -- Unitary consumes them by surveyId, not by
+  conversation.
+- "transcript_session": the ids are (conversationId, communicationId) pairs,
+  one per participant session on those same conversations (transcripts) --
+  its endpoint needs both ids, and a conversation can have several sessions.
 - "management_unit": a wholly different source (funcionarios_adherencia).
 
-Both "conversation" and "division" come from the same conversations_details
-download, just a different field of the same records, so `"tags": "all"`
-expands to every enabled flow of either kind. "management_unit" flows are
-never included -- they need `tags`/`tag` explicitly.
+"conversation", "survey" and "transcript_session" all come from the same
+conversations_details download, just a different part of the same records,
+so `"tags": "all"` expands to every enabled flow of any of those three kinds.
+"management_unit" flows are never included -- they need `tags`/`tag`
+explicitly.
 
     {
       "version": 1,
@@ -23,9 +27,9 @@ never included -- they need `tags`/`tag` explicitly.
         "funcionarios":  {"output_base_path_key": "base_path_wfm"}
       },
       "flows": {
-        "surveys":                  {"enabled": true, "domain": "transacciones", "id_kind": "conversation"},
-        "transcripts":               {"enabled": true, "domain": "transacciones", "id_kind": "division"},
-        "funcionarios_adherencia":  {"enabled": true, "domain": "funcionarios",  "id_kind": "management_unit"}
+        "surveys":     {"enabled": true, "domain": "transacciones", "id_kind": "survey"},
+        "transcripts": {"enabled": true, "domain": "transacciones", "id_kind": "transcript_session"},
+        "funcionarios_adherencia": {"enabled": true, "domain": "funcionarios", "id_kind": "management_unit"}
       }
     }
 
@@ -46,8 +50,9 @@ import src.s3_utils as s3_utils
 from src.config import Settings
 
 CONVERSATION_ID_KIND = "conversation"
-DIVISION_ID_KIND = "division"
-CONVERSATION_DETAILS_ID_KINDS = (CONVERSATION_ID_KIND, DIVISION_ID_KIND)
+SURVEY_ID_KIND = "survey"
+TRANSCRIPT_SESSION_ID_KIND = "transcript_session"
+CONVERSATION_DETAILS_ID_KINDS = (CONVERSATION_ID_KIND, SURVEY_ID_KIND, TRANSCRIPT_SESSION_ID_KIND)
 
 
 class DispatcherConfigError(ValueError):
@@ -105,9 +110,9 @@ def flow_id_kind(config: dict, tag: str) -> str:
 
 
 def conversation_tags(config: dict) -> list[str]:
-    """Every enabled flow whose id_kind is "conversation" or "division" --
-    what `"tags": "all"` expands to. Flows keyed by other ids (e.g.
-    adherence's management units) are never included."""
+    """Every enabled flow whose id_kind is "conversation", "survey" or
+    "transcript_session" -- what `"tags": "all"` expands to. Flows keyed by
+    other ids (e.g. adherence's management units) are never included."""
     return sorted(
         tag
         for tag, flow in config["flows"].items()

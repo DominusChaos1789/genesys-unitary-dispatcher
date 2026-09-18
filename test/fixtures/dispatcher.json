@@ -5,8 +5,8 @@
         "funcionarios": {"output_base_path_key": "base_path_wfm"}
     },
     "flows": {
-        "surveys": {"enabled": true, "domain": "transacciones", "id_kind": "conversation"},
-        "transcripts": {"enabled": true, "domain": "transacciones", "id_kind": "division"},
+        "surveys": {"enabled": true, "domain": "transacciones", "id_kind": "survey"},
+        "transcripts": {"enabled": true, "domain": "transacciones", "id_kind": "transcript_session"},
         "funcionarios_adherencia": {"enabled": true, "domain": "funcionarios", "id_kind": "management_unit"}
     }
 }

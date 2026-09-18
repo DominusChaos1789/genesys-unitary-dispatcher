@@ -15,7 +15,7 @@ def test_catalog_loads_only_the_configured_groups(aws):
     # "ondemand" points at upload.json, which was never uploaded: reading it would raise.
     catalog = load_endpoint_catalog(aws["s3"], load_settings())
 
-    assert "conversations_surveys" in catalog  # unitary group
+    assert "conversations_surveys_result" in catalog  # unitary group
     assert "adherence_agent_status" in catalog  # status group
     assert "conversations_details_init" not in catalog  # daily group, not configured
 
@@ -52,7 +52,7 @@ def test_core_config_may_wrap_groups_and_use_single_string_references(aws):
 
     catalog = load_endpoint_catalog(aws["s3"], load_settings())
 
-    assert "conversations_surveys" in catalog
+    assert "conversations_surveys_result" in catalog
     assert "adherence_agent_status" in catalog
 
 
@@ -62,7 +62,7 @@ def test_an_endpoint_defined_differently_in_two_files_is_an_error(aws):
         Bucket=RESOURCES_BUCKET,
         Key=f"{ENDPOINTS_PREFIX}/other.json",
         Body=json.dumps(
-            {"conversations_surveys": {"url": "/different", "tag": "surveys", "type": "unitary"}}
+            {"conversations_surveys_result": {"url": "/different", "tag": "surveys", "type": "unitary"}}
         ),
     )
     s3.put_object(
@@ -76,7 +76,7 @@ def test_an_endpoint_defined_differently_in_two_files_is_an_error(aws):
         ),
     )
 
-    with pytest.raises(ValueError, match="'conversations_surveys' is defined differently"):
+    with pytest.raises(ValueError, match="'conversations_surveys_result' is defined differently"):
         load_endpoint_catalog(s3, load_settings())
 
 
@@ -93,14 +93,14 @@ def test_the_same_file_referenced_twice_is_tolerated(aws):
         ),
     )
 
-    assert "conversations_surveys" in load_endpoint_catalog(s3, load_settings())
+    assert "conversations_surveys_result" in load_endpoint_catalog(s3, load_settings())
 
 
 def test_surveys_is_a_single_direct_stage():
     stages = select_stages(_catalog(), "surveys")
 
     assert list(stages) == ["request_context"]
-    assert stages["request_context"][0] == "conversations_surveys"
+    assert stages["request_context"][0] == "conversations_surveys_result"
 
 
 def test_adherence_is_init_then_status_without_a_users_listing():
@@ -149,11 +149,11 @@ def test_a_tagged_endpoint_whose_type_maps_to_no_stage_is_an_error():
         select_stages(catalog, "surveys")
 
 
-def test_transcripts_is_search_then_a_follow_up_url_stage():
+def test_transcripts_is_a_single_url_stage():
     stages = select_stages(_catalog(), "transcripts")
 
-    assert list(stages) == ["request_context", "request_url"]
-    assert [name for name, _ in stages.values()] == ["transcripts_search", "transcripts_url"]
+    assert list(stages) == ["request_url"]
+    assert stages["request_url"][0] == "transcripts_url"
 
 
 def test_url_type_endpoints_map_to_the_request_url_stage():

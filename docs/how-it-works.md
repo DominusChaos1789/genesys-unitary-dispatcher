@@ -70,8 +70,8 @@ and deletes the transcription files it processed.
 | 1 | Settings | Environment token from `ENV_PREFIX` → `ENVIRONMENT` → `PROFILE` → `STACK_ID` (default `dev`); bucket names, SSM path and resource name derive from it. | `config.load_settings` |
 | 2 | Execution id | The Lambda request id, or a UUID when there is no Lambda context. | `main.handler` |
 | 3 | Tags | `tag` (one) or `tags` (a list, or `"all"`), top-level or under `detail`. | `sources.resolve_tag_selection` |
-| 4 | Validate | Load `dispatcher.json` and the endpoint catalog. Expand `"all"` to every enabled flow with `id_kind` `"conversation"`. For every tag: it must be declared and enabled in `dispatcher.json`, resolve its output-prefix key from its domain, and have endpoints for each stage it needs. Every tag is checked **here**, before any ids are read. | `dispatcher_config.load_dispatcher_config`, `dispatcher_config.conversation_tags`, `dispatcher_config.flow_config`, `dispatcher_config.output_base_path_key`, `endpoints.load_endpoint_catalog`, `endpoints.select_stages` |
-| 5 | Ids | With `"ids_source": "contracts"`: run the [contracts process](#contracts-process-where-surveys-ids-come-from) and group its conversation ids by organization. With `"ids_source": "conversations_details"`: read that `date`'s [conversation files](#conversations-download-ids-without-a-contract) per `org_id=` folder. Otherwise from `event.organizations`, else the S3 file in `event.ids_location`, else the S3 object named in `event.detail`. Organizations merge, ids are de-duplicated and sorted, organizations without ids are dropped. | `main._resolve_ids`, `contracts_process.run_contracts`, `conversations_details.collect_conversation_ids`, `sources.resolve_ids_by_organization` |
+| 4 | Validate | Load `dispatcher.json` and the endpoint catalog. Expand `"all"` to every enabled flow with `id_kind` `"conversation"`, `"survey"` or `"transcript_session"`. For every tag: it must be declared and enabled in `dispatcher.json`, resolve its output-prefix key from its domain, and have endpoints for each stage it needs. Every tag is checked **here**, before any ids are read. | `dispatcher_config.load_dispatcher_config`, `dispatcher_config.conversation_tags`, `dispatcher_config.flow_config`, `dispatcher_config.output_base_path_key`, `endpoints.load_endpoint_catalog`, `endpoints.select_stages` |
+| 5 | Ids | With `"ids_source": "contracts"`: run the [contracts process](#contracts-process-where-surveys-ids-come-from) and group its conversation ids by organization. With `"ids_source": "conversations_details"`: read that `date`'s [conversation files](#conversations-download-ids-without-a-contract) per `org_id=` folder, once per distinct `id_kind` among the tags run. Otherwise from `event.organizations`, else the S3 file in `event.ids_location`, else the S3 object named in `event.detail`. Organizations merge, ids are de-duplicated and sorted, organizations without ids are dropped. | `main._resolve_ids`, `main._resolve_ids_by_kind`, `contracts_process.run_contracts`, `conversations_details.collect_survey_ids`, `conversations_details.collect_transcript_session_ids`, `sources.resolve_ids_by_organization` |
 | 6 | Genesys config | Once per run, and only if there are ids: `connection`, `servers`, `config` and the OAuth secrets. | `token_manager.load_config` |
 | 7 | Output prefix | Resolve each tag's output-prefix key (from step 4) against `config.output` (SSM). | `payload.output_base_path` |
 | 8 | Per organization | Find its `servers` entry → get its token (once, for every tag) → build its entry for each tag, one request template per stage. | `main._build_organizations`, `token_manager.get_token`, `payload.build_organization_entry` |
@@ -124,7 +124,7 @@ and stages always come out in this order:
 | `unitary` | `request_context` | a direct call per id (or an initial listing) |
 | `init` | `request_init` | starts an asynchronous job, returns a `jobId` |
 | `status` | `request_status` | polled until the job completes |
-| `url` | `request_url` | a follow-up call needing data the first call returned (transcripts: search → this fetches the URL, once `{communicationId}` is known) |
+| `url` | `request_url` | a call whose ids come straight from `entry["ids"]`, not a preceding stage (transcripts: `{conversationId}`/`{communicationId}` are already known from the conversations download) |
 
 A flow needs at least one stage and at most one endpoint per stage. Endpoints
 without a `tag` belong to no flow. But being tagged isn't enough to *run*: the
@@ -132,10 +132,13 @@ tag also has to be declared and `enabled` in **dispatcher.json**
 (`src/dispatcher_config.py`), which is the actual switch for whether a flow
 may execute and which output domain it belongs to.
 
-A run can execute several flows over the same ids (`"tags": ["surveys", "recordings"]`)
-or every enabled conversation flow (`"tags": "all"`, from dispatcher.json's
-`id_kind: "conversation"` flows — not by scanning endpoint URLs). The ids are
-read once and each organization's token is requested once; each
+A run can execute several flows (`"tags": ["surveys", "recordings"]`) or every
+enabled conversations_details-sourced flow (`"tags": "all"`, from
+dispatcher.json's `id_kind` `"conversation"`, `"survey"` or
+`"transcript_session"` flows — not by scanning endpoint URLs). Ids are
+resolved once per distinct `id_kind` among the tags run, not once overall --
+a `"survey"` tag and a `"transcript_session"` tag never share an ids list.
+Each organization's token is still requested once for the whole run; each
 (tag, organization) pair gets its own flat payload file.
 
 **To add a flow:**
@@ -158,19 +161,19 @@ steps 1-2, both S3 edits.
 
 | | |
 |---|---|
-| Ids | Genesys conversation ids, grouped by organization |
-| Stages | `request_context`: `GET /api/v2/quality/conversations/{conversationId}/surveys` |
+| Ids | Finished surveyIds (`id_kind: "survey"`) -- each conversation's `surveys[]` entries with `surveyStatus == "Finished"`, by `surveyId`; not the conversation itself |
+| Stages | `request_context`: `GET /api/v2/quality/surveys/{surveyId}` |
 | Saved under | `transacciones/genesys/api` |
-| Next | Download calls the template once per conversation id. No job, no polling. |
+| Next | Download calls the template once per surveyId. No job, no polling. |
 
 ### `transcripts`
 
 | | |
 |---|---|
-| Ids | divisionIds (`id_kind: "division"`), read off the same conversation records surveys reads for its conversation ids -- not conversation ids themselves, since the search endpoint filters by division |
-| Stages | `request_context`: `POST /api/v2/speechandtextanalytics/transcripts/search` (fixed `mediaType`/`language`, `{divisionId}` per id, `{page_size}`/`{page_number}`/`{time_intervals}` left for Download's pagination loop) → `request_url`: `GET .../conversations/{conversationId}/communications/{communicationId}/transcripturl` |
+| Ids | `{conversationId, communicationId}` pairs (`id_kind: "transcript_session"`) -- one per participant session on a conversation record, read off the same conversations_details files surveys reads |
+| Stages | `request_url`: `GET .../conversations/{conversationId}/communications/{communicationId}/transcripturl` |
 | Saved under | `transacciones/genesys/api` |
-| Next | Download executes the search (once per divisionId, paginating), reads each `conversationId`/`communicationId` pair out of its `returnFields`, fills them into `request_url`'s template (this Lambda leaves both as placeholders, since they only come from the search response), and fetches each transcript URL. |
+| Next | Download calls the template once per pair -- both ids are already known, so there's no preceding search/listing call to wait on. |
 
 ### Contracts process: where surveys ids come from
 
