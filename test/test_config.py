@@ -144,3 +144,22 @@ def test_conversations_details_overrides(monkeypatch):
 
     assert settings.conversations_details_bucket == "augusta-nexa-dev-landing-archive"
     assert settings.conversations_details_prefix == "other/prefix/"
+
+
+def test_conversations_events_defaults_follow_the_environment(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "stg")
+
+    settings = load_settings()
+
+    assert settings.conversations_events_bucket == "augusta-nexa-stg-landing"
+    assert settings.conversations_events_prefix == "transacciones/genesys/events/"
+
+
+def test_conversations_events_overrides(monkeypatch):
+    monkeypatch.setenv("CONVERSATIONS_EVENTS_BUCKET", "augusta-nexa-dev-landing-archive")
+    monkeypatch.setenv("CONVERSATIONS_EVENTS_PREFIX", "other/events/")
+
+    settings = load_settings()
+
+    assert settings.conversations_events_bucket == "augusta-nexa-dev-landing-archive"
+    assert settings.conversations_events_prefix == "other/events/"

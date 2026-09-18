@@ -12,13 +12,17 @@ kind of id feeds it):
 - "transcript_session": the ids are (conversationId, communicationId) pairs,
   one per participant session on those same conversations (transcripts) --
   its endpoint needs both ids, and a conversation can have several sessions.
+- "transcript_event": also (conversationId, communicationId) pairs, but read
+  one event id at a time from the real-time conversation-event process
+  instead of a whole day's conversations_details download
+  (transcript_events).
 - "management_unit": a wholly different source (funcionarios_adherencia).
 
 "conversation", "survey" and "transcript_session" all come from the same
 conversations_details download, just a different part of the same records,
 so `"tags": "all"` expands to every enabled flow of any of those three kinds.
-"management_unit" flows are never included -- they need `tags`/`tag`
-explicitly.
+"transcript_event" and "management_unit" flows are never included -- they
+need `tags`/`tag` explicitly, since neither is driven by a `date`.
 
     {
       "version": 1,
@@ -52,6 +56,7 @@ from src.config import Settings
 CONVERSATION_ID_KIND = "conversation"
 SURVEY_ID_KIND = "survey"
 TRANSCRIPT_SESSION_ID_KIND = "transcript_session"
+TRANSCRIPT_EVENT_ID_KIND = "transcript_event"
 CONVERSATION_DETAILS_ID_KINDS = (CONVERSATION_ID_KIND, SURVEY_ID_KIND, TRANSCRIPT_SESSION_ID_KIND)
 
 

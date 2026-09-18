@@ -37,6 +37,7 @@ that got a payload file — even for these single-organization events.
 | `08-adherence-s3-file` | adherence for the units listed in an S3 file | reads the file | same as 07 |
 | `09-eventbridge-s3` | the S3 "Object Created" event EventBridge would send for that file | reads the file | same as 07 |
 | `15-transcripts-inline` | transcripts for one `{conversationId, communicationId}` pair sent in the event | token + payload | list of 1: `stages: ["request_url"]` |
+| `16-transcript-events` | transcript_events for one real-time event id sent in the event | reads that event's file under `.../genesys/events/` (never deletes it) | list of 1: `stages: ["request_url"]` |
 | `06-surveys-contracts` | the hourly contracts process, then surveys | ⚠️ **writes parquet to refined and deletes the processed transcription files in providers-landing** | list with one entry per contract's organization; contract counts are in the `Run summary` log line |
 
 Every successful run writes one **flat** file per (tag, organization) pair to a
@@ -61,6 +62,11 @@ the `Run summary` log line for the per-organization counts.
   not a plain string (transcripts' `id_kind` is `"transcript_session"`) --
   replace both with real ids from a landing file if Status/Download will act
   on the payload.
+- **`16`**: its event id (`00000000-0000-4000-8000-000000000003`) has to name
+  a file that actually exists at
+  `augusta-nexa-dev-landing/transacciones/genesys/events/org_id=1/<event_id>.json`,
+  shaped like `{"detail": {"eventBody": {"conversationId": "...", "sessionId": "...", ...}}}`
+  -- upload one first if running this from the console.
 - **`08`, `09`**: upload the units file first (edit its id too). The key is an
   example; use wherever the 2 a.m. process actually writes it:
 

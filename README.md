@@ -40,6 +40,7 @@ Current tags:
 |---|---|---|
 | `surveys` | `request_context` | `conversations_surveys_result` (GET `/quality/surveys/{surveyId}`, one call per Finished surveyId, no polling) |
 | `transcripts` | `request_url` | `transcripts_url` (GET `/speechandtextanalytics/conversations/{conversationId}/communications/{communicationId}/transcripturl`, one call per (conversationId, communicationId) pair — see [Payload](#payload)) |
+| `transcript_events` | `request_url` | `transcript_events_url` (the same call as `transcripts_url`; only its ids source differs — real-time events instead of a daily download) |
 | `funcionarios_adherencia` | `request_init` → `request_status` | `adherence_historical_init` (POST, one bulk job per management unit; no `userIds`, so it covers every user in the unit), `adherence_agent_status` |
 
 Adding a flow needs two things: tag its endpoints here (no code change, as
@@ -64,6 +65,7 @@ deploy:
   "flows": {
     "surveys":                 {"enabled": true, "domain": "transacciones", "id_kind": "survey"},
     "transcripts":              {"enabled": true, "domain": "transacciones", "id_kind": "transcript_session"},
+    "transcript_events":        {"enabled": true, "domain": "transacciones", "id_kind": "transcript_event"},
     "funcionarios_adherencia": {"enabled": true, "domain": "funcionarios",  "id_kind": "management_unit"}
   }
 }
@@ -77,13 +79,13 @@ deploy:
   `id_kind` is `"conversation"`, `"survey"` or `"transcript_session"`. All
   three come from the same conversations_details download, just a different
   part of the same records (see [Ids from the Genesys conversations
-  download](#ids-from-the-genesys-conversations-download)); adherence's
-  `"management_unit"` keeps it out of `"all"` since it needs an unrelated
-  source. With `ids_source: "conversations_details"`, ids are resolved once
-  per distinct `id_kind` among the tags run — a `"survey"` tag and a
-  `"transcript_session"` tag in the same run never share an ids list, even
-  though both come from that day's files. An organization with ids for one
-  kind but none for another (e.g. no Finished surveys that day) simply gets
+  download](#ids-from-the-genesys-conversations-download)); `"transcript_event"`
+  and adherence's `"management_unit"` keep it out of `"all"` since neither is
+  driven by a `date`. With `ids_source: "conversations_details"`, ids are
+  resolved once per distinct `id_kind` among the tags run — a `"survey"` tag
+  and a `"transcript_session"` tag in the same run never share an ids list,
+  even though both come from that day's files. An organization with ids for
+  one kind but none for another (e.g. no Finished surveys that day) simply gets
   no file for that tag — it's not a failure.
 
 This is config, not code: turning a flow on/off, moving it to a different
@@ -126,14 +128,16 @@ drop an organization.
 {"tags": "all", "ids_source": "conversations_details", "date": "2026-08-13"}
 ```
 
-`tags` runs several flows over the same ids: the ids are read once, each
-organization's token is requested once, and each (tag, organization) pair gets
-its own payload file. `"all"` means every **enabled** flow in
-[dispatcher.json](#dispatcherjson) whose `id_kind` is `"conversation"` —
-adherence's `"management_unit"` keeps it out, and a new conversation flow
-joins `"all"` as soon as it's declared there. Every tag is validated (declared,
-enabled, has endpoints) before any ids are read. Send either `tag` or `tags`,
-not both.
+`tags` runs several flows: ids are resolved once per distinct `id_kind`
+among them (not once overall — see [dispatcher.json](#dispatcherjson)), each
+organization's token is requested once for the whole run, and each
+(tag, organization) pair gets its own payload file. `"all"` means every
+**enabled** flow in dispatcher.json whose `id_kind` is `"conversation"`,
+`"survey"` or `"transcript_session"` — adherence's `"management_unit"` and
+transcript_events' `"transcript_event"` keep those two out, and a new
+conversations_details-sourced flow joins `"all"` as soon as it's declared
+there. Every tag is validated (declared, enabled, has endpoints) before any
+ids are read. Send either `tag` or `tags`, not both.
 
 ### Ids from the contracts process
 
@@ -175,6 +179,28 @@ that have no `endpoint` list, are skipped and listed in
 `conversations_details.skipped_files`. `date` is required, as `YYYY-MM-DD`.
 
 An unknown `ids_source` value fails the run before any file is touched.
+
+### Ids from real-time conversation events (`transcript_events`)
+
+```json
+{"tag": "transcript_events",
+ "organizations": [{"organization_id": "org-1", "ids": ["<event_id>", "..."]}]}
+```
+
+`transcript_events`' `id_kind` is `"transcript_event"`, not one of the three
+above — its ids aren't read from a whole day's conversations_details
+download at all. A separate real-time process writes each Genesys Cloud
+conversation event into
+`augusta-nexa-<env>-landing/transacciones/genesys/events/org_id=<N>/<event_id>.json`
+as it happens (no date partitioning), and an SQS-fed Step Function hands this
+Lambda the event ids to read for each organization, the same way any other
+tag's ids are supplied. For each one, the run reads that file — shaped like
+`{"detail": {"eventBody": {"conversationId": ..., "sessionId": ..., ...}}}` —
+and resolves it into the same `{conversationId, communicationId}` pair shape
+`"transcript_session"` builds from the batch download, feeding the same
+`transcript_events_url` endpoint transcripts uses. An event id whose file
+can't be read, or that's missing `conversationId`/`sessionId`, is skipped and
+listed in `transcript_events.skipped_files`; nothing is deleted.
 
 ## Payload
 
@@ -365,6 +391,8 @@ All optional.
 | `CONTRACT_KEY` | *(unset)* | Contracts process: pin the run to this one contract. |
 | `CONVERSATIONS_DETAILS_BUCKET` | `augusta-nexa-<env>-landing` | Conversations-download source: the bucket it writes to. Logical or full name. |
 | `CONVERSATIONS_DETAILS_PREFIX` | `transacciones/genesys/api/conversations_details/` | The folder holding the `org_id=<N>/year=/month=/day=` partitions. |
+| `CONVERSATIONS_EVENTS_BUCKET` | `augusta-nexa-<env>-landing` | `transcript_events` source: the bucket the real-time event process writes to. Logical or full name. |
+| `CONVERSATIONS_EVENTS_PREFIX` | `transacciones/genesys/events/` | The folder holding the `org_id=<N>/<event_id>.json` files (no date partitioning). |
 
 ## Deployment
 

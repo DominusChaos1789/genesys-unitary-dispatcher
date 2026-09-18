@@ -23,6 +23,10 @@ DEFAULT_CONTRACTS_PREFIX = "contracts/entrada/transacciones/empatia/transcripcio
 # Where the Genesys conversations download leaves its files:
 # <prefix>org_id=<N>/year=YYYY/month=MM/day=DD/*.json
 DEFAULT_CONVERSATIONS_DETAILS_PREFIX = "transacciones/genesys/api/conversations_details/"
+# Where the real-time conversation-event process leaves its files, one per
+# event: <prefix>org_id=<N>/<event_id>.json -- no date partitioning, since
+# events arrive continuously rather than once a day.
+DEFAULT_CONVERSATIONS_EVENTS_PREFIX = "transacciones/genesys/events/"
 
 
 def normalize_env_token(value: str) -> str:
@@ -74,6 +78,10 @@ class Settings:
     # conversations download writes to.
     conversations_details_bucket: str
     conversations_details_prefix: str
+    # transcript_events (id_kind "transcript_event"): the bucket and prefix
+    # the real-time conversation-event process writes to.
+    conversations_events_bucket: str
+    conversations_events_prefix: str
 
     def resolve_bucket(self, name: str) -> str:
         """ "landing" -> "augusta-nexa-dev-landing"; full names pass through."""
@@ -111,5 +119,9 @@ def load_settings() -> Settings:
         conversations_details_bucket=bucket("CONVERSATIONS_DETAILS_BUCKET", "landing"),
         conversations_details_prefix=os.environ.get(
             "CONVERSATIONS_DETAILS_PREFIX", DEFAULT_CONVERSATIONS_DETAILS_PREFIX
+        ),
+        conversations_events_bucket=bucket("CONVERSATIONS_EVENTS_BUCKET", "landing"),
+        conversations_events_prefix=os.environ.get(
+            "CONVERSATIONS_EVENTS_PREFIX", DEFAULT_CONVERSATIONS_EVENTS_PREFIX
         ),
     )

@@ -71,7 +71,7 @@ and deletes the transcription files it processed.
 | 2 | Execution id | The Lambda request id, or a UUID when there is no Lambda context. | `main.handler` |
 | 3 | Tags | `tag` (one) or `tags` (a list, or `"all"`), top-level or under `detail`. | `sources.resolve_tag_selection` |
 | 4 | Validate | Load `dispatcher.json` and the endpoint catalog. Expand `"all"` to every enabled flow with `id_kind` `"conversation"`, `"survey"` or `"transcript_session"`. For every tag: it must be declared and enabled in `dispatcher.json`, resolve its output-prefix key from its domain, and have endpoints for each stage it needs. Every tag is checked **here**, before any ids are read. | `dispatcher_config.load_dispatcher_config`, `dispatcher_config.conversation_tags`, `dispatcher_config.flow_config`, `dispatcher_config.output_base_path_key`, `endpoints.load_endpoint_catalog`, `endpoints.select_stages` |
-| 5 | Ids | With `"ids_source": "contracts"`: run the [contracts process](#contracts-process-where-surveys-ids-come-from) and group its conversation ids by organization. With `"ids_source": "conversations_details"`: read that `date`'s [conversation files](#conversations-download-ids-without-a-contract) per `org_id=` folder, once per distinct `id_kind` among the tags run. Otherwise from `event.organizations`, else the S3 file in `event.ids_location`, else the S3 object named in `event.detail`. Organizations merge, ids are de-duplicated and sorted, organizations without ids are dropped. | `main._resolve_ids`, `main._resolve_ids_by_kind`, `contracts_process.run_contracts`, `conversations_details.collect_survey_ids`, `conversations_details.collect_transcript_session_ids`, `sources.resolve_ids_by_organization` |
+| 5 | Ids | With `"ids_source": "contracts"`: run the [contracts process](#contracts-process-where-surveys-ids-come-from) and group its conversation ids by organization. With `"ids_source": "conversations_details"`: read that `date`'s [conversation files](#conversations-download-ids-without-a-contract) per `org_id=` folder, once per distinct `id_kind` among the tags run. Otherwise from `event.organizations`, else the S3 file in `event.ids_location`, else the S3 object named in `event.detail`. Organizations merge, ids are de-duplicated and sorted, organizations without ids are dropped. For a `"transcript_event"` tag, whatever ids came out of the step above are then treated as event ids and resolved into `{conversationId, communicationId}` pairs by reading each one's file. | `main._resolve_ids`, `main._resolve_ids_by_kind`, `contracts_process.run_contracts`, `conversations_details.collect_survey_ids`, `conversations_details.collect_transcript_session_ids`, `sources.resolve_ids_by_organization`, `transcript_events.resolve_transcript_events` |
 | 6 | Genesys config | Once per run, and only if there are ids: `connection`, `servers`, `config` and the OAuth secrets. | `token_manager.load_config` |
 | 7 | Output prefix | Resolve each tag's output-prefix key (from step 4) against `config.output` (SSM). | `payload.output_base_path` |
 | 8 | Per organization | Find its `servers` entry → get its token (once, for every tag) → build its entry for each tag, one request template per stage. | `main._build_organizations`, `token_manager.get_token`, `payload.build_organization_entry` |
@@ -175,6 +175,15 @@ steps 1-2, both S3 edits.
 | Saved under | `transacciones/genesys/api` |
 | Next | Download calls the template once per pair -- both ids are already known, so there's no preceding search/listing call to wait on. |
 
+### `transcript_events`
+
+| | |
+|---|---|
+| Ids | `{conversationId, communicationId}` pairs (`id_kind: "transcript_event"`), same shape as `transcripts` -- but resolved one real-time event at a time (see [below](#real-time-conversation-events-ids-for-transcript_events)), not from a whole day's conversations_details download |
+| Stages | `request_url`: `GET .../conversations/{conversationId}/communications/{communicationId}/transcripturl` (`transcript_events_url` -- same call as `transcripts_url`, tagged separately) |
+| Saved under | `transacciones/genesys/api` |
+| Next | Same as `transcripts`: Download calls the template once per pair. |
+
 ### Contracts process: where surveys ids come from
 
 The hourly schedule sends `{"tag": "surveys", "ids_source": "contracts"}`. Before
@@ -224,6 +233,29 @@ flowchart LR
 | Validate `date` (`YYYY-MM-DD`) | `conversations_details.parse_date` |
 | List the `org_id=` folders | `s3_utils.list_common_prefixes` |
 | Read that day's files one at a time, keeping only the ids; skip unreadable ones | `conversations_details.collect_conversation_ids` |
+
+### Real-time conversation events: ids for `transcript_events`
+
+`{"tag": "transcript_events", "organizations": [{"organization_id": "org-1", "ids": ["<event_id>", "..."]}]}`
+supplies event ids, not conversation or session ids directly. A separate
+real-time process writes each Genesys Cloud conversation event as its own
+file, one per organization, no date partitioning (events arrive
+continuously):
+
+```mermaid
+flowchart LR
+    E["landing/.../events/<br/>org_id=N/&lt;event_id&gt;.json"] --> R["read the given event ids'<br/>files one at a time"]
+    R --> X["extract detail.eventBody.<br/>conversationId + sessionId"]
+    X --> P["{conversationId,<br/>communicationId} pairs"]
+```
+
+| Step | Code |
+|---|---|
+| Build the file key from the org and event id | `transcript_events._event_key` |
+| Read each event id's file; skip unreadable ones or ones missing conversationId/sessionId | `transcript_events.resolve_transcript_events` |
+| Extract the pair | `transcript_events._conversation_session_pair` |
+
+Not part of `"tags": "all"` -- see [dispatcher.json](#3-how-a-flow-is-defined).
 
 ### `funcionarios_adherencia`
 
@@ -330,7 +362,8 @@ them. Problems specific to one organization only affect that organization.
 | [src/main.py](../src/main.py) | `handler`/`run`: runs the steps above; `_resolve_ids`: event or an ids source; `_build_organizations`: the per-organization loop; `_write_payloads`: one flat file per (tag, organization) |
 | [src/dispatcher_config.py](../src/dispatcher_config.py) | loads and validates dispatcher.json; which tags may run, their domain, their `id_kind` |
 | [src/contracts_process.py](../src/contracts_process.py) | the contracts process: per-contract loop, parquet writes, source deletion, ids by organization |
-| [src/conversations_details.py](../src/conversations_details.py) | ids from the Genesys conversations download: date partition, `org_id=` folders, `conversationId` |
+| [src/conversations_details.py](../src/conversations_details.py) | ids from the Genesys conversations download: date partition, `org_id=` folders, surveyIds/`{conversationId, communicationId}` pairs/conversationId |
+| [src/transcript_events.py](../src/transcript_events.py) | resolves `transcript_events`' event ids into `{conversationId, communicationId}` pairs, one real-time event file at a time |
 | [src/contract.py](../src/contract.py) | the contract model; contract discovery and loading |
 | [src/transform.py](../src/transform.py) | source record → business row: rename, cast, transformations, dedup |
 | [src/technical_columns.py](../src/technical_columns.py) | technical columns engine; `output_core` / `output_atts` rows |

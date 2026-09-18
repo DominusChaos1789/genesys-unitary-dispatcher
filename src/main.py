@@ -9,6 +9,7 @@ every stage of that flow (payload.py):
 
     surveys                  -> request_context
     transcripts              -> request_url
+    transcript_events        -> request_url (same endpoint, ids from real-time events)
     funcionarios_adherencia  -> request_init, request_status (one job per management unit)
 
 `"tags": [...]` runs several flows over their own ids, and `"tags": "all"` runs
@@ -29,6 +30,15 @@ Ids sources:
   Finished surveyIds, (conversationId, communicationId) session pairs, or the
   conversation ids themselves, depending on the tag's id_kind
   (conversations_details.py). Those files are left untouched.
+
+transcript_events (id_kind "transcript_event") is a further step on top of
+whichever ids source above supplied its ids (normally the event's own inline
+ids): those ids are event ids, one file each under the real-time
+conversation-event process's landing prefix, resolved here into
+{conversationId, communicationId} pairs the same way "transcript_session"
+does from a whole day's conversations_details download
+(transcript_events.py). It isn't part of `"tags": "all"`, since it isn't
+driven by a `date` the way the other three kinds are.
 
 Each organization's payload is written to the logs bucket under its tag and
 its own organization id -- one flat file, no "organization" array, at a fixed
@@ -61,6 +71,7 @@ from src.conversations_details import (
 )
 from src.dispatcher_config import (
     SURVEY_ID_KIND,
+    TRANSCRIPT_EVENT_ID_KIND,
     TRANSCRIPT_SESSION_ID_KIND,
     conversation_tags,
     flow_config,
@@ -72,6 +83,7 @@ from src.endpoints import load_endpoint_catalog, select_stages
 from src.payload import build_organization_entry, build_organization_payload, output_base_path
 from src.sources import ALL_TAGS, EventError, resolve_ids_by_organization, resolve_tag_selection
 from src.token_manager import get_token, load_config
+from src.transcript_events import resolve_transcript_events
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -99,22 +111,36 @@ def _expand_tags(selection: list[str] | str, dispatcher: dict) -> list[str]:
 
 
 def _resolve_ids(s3_client, settings: Settings, event: dict, execution_id: str, id_kind: str):
-    """(ids by organization, source summary or None).
+    """(ids by organization, source summary or None, summary key or None).
 
     Without `ids_source` the ids come from the event itself, whatever they
     are for the tags requested. With one, they come from that process for the
-    given `id_kind`, and its summary goes into the logged run summary. The
-    contracts process is imported here, not at module level: it's the only
-    path that needs polars, so the other flows never load it.
+    given `id_kind`, and its summary goes into the logged run summary under
+    `summary key`. The contracts process is imported here, not at module
+    level: it's the only path that needs polars, so the other flows never
+    load it.
+
+    "transcript_event" is a further step on top of this: whatever ids came
+    out above (normally the event's own inline ids) are event ids, one file
+    each under the real-time conversation-event process's landing prefix --
+    resolved here into the {conversationId, communicationId} pairs
+    transcripts_url needs, with their own summary.
     """
     ids_source = event.get("ids_source")
-    if ids_source is None:
-        return resolve_ids_by_organization(s3_client, settings, event), None
+    summary = None
+    summary_key = None
 
-    if ids_source == CONTRACTS_IDS_SOURCE:
+    if ids_source is None:
+        ids_by_organization = resolve_ids_by_organization(s3_client, settings, event)
+    elif ids_source == CONTRACTS_IDS_SOURCE:
         from src.contracts_process import run_contracts
 
         outcome = run_contracts(s3_client, settings, execution_id)
+        ids_by_organization, summary, summary_key = (
+            outcome["ids_by_organization"],
+            outcome["summary"],
+            ids_source,
+        )
     elif ids_source == CONVERSATIONS_DETAILS_IDS_SOURCE:
         day = parse_date(event.get("date"))
         if id_kind == SURVEY_ID_KIND:
@@ -123,13 +149,27 @@ def _resolve_ids(s3_client, settings: Settings, event: dict, execution_id: str, 
             outcome = collect_transcript_session_ids(s3_client, settings, day)
         else:
             outcome = collect_conversation_ids(s3_client, settings, day)
+        ids_by_organization, summary, summary_key = (
+            outcome["ids_by_organization"],
+            outcome["summary"],
+            ids_source,
+        )
     else:
         raise EventError(f"Unknown ids_source {ids_source!r}; expected one of {sorted(IDS_SOURCES)}")
-    return outcome["ids_by_organization"], outcome["summary"]
+
+    if id_kind == TRANSCRIPT_EVENT_ID_KIND:
+        outcome = resolve_transcript_events(s3_client, settings, ids_by_organization)
+        ids_by_organization, summary, summary_key = (
+            outcome["ids_by_organization"],
+            outcome["summary"],
+            "transcript_events",
+        )
+
+    return ids_by_organization, summary, summary_key
 
 
 def _resolve_ids_by_kind(s3_client, settings: Settings, event: dict, execution_id: str, id_kinds: set[str]):
-    """({id_kind: ids by organization}, {id_kind: source summary}).
+    """({id_kind: ids by organization}, {id_kind: (summary key, summary)}).
 
     Ids are resolved once per distinct id_kind among the tags requested (e.g.
     "tags": "all" mixes "survey" tags like surveys with "transcript_session"
@@ -139,12 +179,14 @@ def _resolve_ids_by_kind(s3_client, settings: Settings, event: dict, execution_i
     for sending ids that fit whatever tag(s) they asked for.
     """
     ids_by_kind: dict[str, dict[str, list[str]]] = {}
-    summaries_by_kind: dict[str, dict] = {}
+    summaries_by_kind: dict[str, tuple[str, dict]] = {}
     for id_kind in sorted(id_kinds):
-        ids_by_organization, summary = _resolve_ids(s3_client, settings, event, execution_id, id_kind)
+        ids_by_organization, summary, summary_key = _resolve_ids(
+            s3_client, settings, event, execution_id, id_kind
+        )
         ids_by_kind[id_kind] = ids_by_organization
         if summary is not None:
-            summaries_by_kind[id_kind] = summary
+            summaries_by_kind[id_kind] = (summary_key, summary)
     return ids_by_kind, summaries_by_kind
 
 
@@ -334,11 +376,14 @@ def run(event, context) -> dict:
             for f in failed
         ],
     }
-    if summaries_by_kind:
-        # The common case is one id_kind: keep the summary flat under the
-        # ids_source name, as before. Only nest it by kind when a run (e.g.
-        # "tags": "all") actually mixed more than one.
-        result[event["ids_source"]] = (
-            next(iter(summaries_by_kind.values())) if len(summaries_by_kind) == 1 else summaries_by_kind
-        )
+    # Group summaries by their key (usually `ids_source`, but "transcript_events"
+    # for id_kind "transcript_event", which isn't gated by one). The common
+    # case is one id_kind per key: keep that summary flat under the key, as
+    # before. Only nest it by id_kind when a run (e.g. "tags": "all") actually
+    # mixed more than one under the same key.
+    summaries_by_summary_key: dict[str, dict[str, dict]] = {}
+    for id_kind, (summary_key, summary) in summaries_by_kind.items():
+        summaries_by_summary_key.setdefault(summary_key, {})[id_kind] = summary
+    for summary_key, per_kind in summaries_by_summary_key.items():
+        result[summary_key] = next(iter(per_kind.values())) if len(per_kind) == 1 else per_kind
     return result
