@@ -181,7 +181,7 @@ that have no `endpoint` list, are skipped and listed in
 ### Ids from the Genesys management units download
 
 ```json
-{"tag": "funcionarios_adherencia", "ids_source": "user_managment_unit", "date": "2026-08-13"}
+{"tag": "funcionarios_adherencia", "ids_source": "management_unit_list", "date": "2026-08-13"}
 ```
 
 An alternative to `ids_location`/an S3 event for `funcionarios_adherencia`,
@@ -192,7 +192,7 @@ file. A separate process downloads the management unit list into
 `date`'s files for every `org_id=` folder and collects each `endpoint[]`
 record's `id` (`management_units.py`). Files that can't be read, or that
 have no `endpoint` list, are skipped and listed in
-`user_managment_unit.skipped_files`. `date` is required, as `YYYY-MM-DD`.
+`management_unit_list.skipped_files`. `date` is required, as `YYYY-MM-DD`.
 
 An unknown `ids_source` value fails the run before any file is touched.
 
@@ -252,7 +252,7 @@ unpack, so a Step Function can read one file straight into a Map state:
   `{conversationId}`, `{communicationId}`, `{mu_id}`, `{jobId}`,
   `{star_date}`, `{end_date}` — are left for Status/Download to fill per call.
 - `date` is `event["date"]` for a run sourced by `conversations_details` or
-  `user_managment_unit`, otherwise the day the run happened (UTC) — every
+  `management_unit_list`, otherwise the day the run happened (UTC) — every
   tag's payload carries it, not just the date-driven ones.
 
 transcripts' `entry["ids"]` are `{conversationId, communicationId}` objects
@@ -414,7 +414,7 @@ All optional.
 | `CONVERSATIONS_DETAILS_PREFIX` | `transacciones/genesys/api/conversations_details/` | The folder holding the `org_id=<N>/year=/month=/day=` partitions. |
 | `CONVERSATIONS_EVENTS_BUCKET` | `augusta-nexa-<env>-landing` | `transcript_events` source: the bucket the real-time event process writes to. Logical or full name. |
 | `CONVERSATIONS_EVENTS_PREFIX` | `transacciones/genesys/events/` | The folder holding the `org_id=<N>/<event_id>.json` files (no date partitioning). |
-| `MANAGEMENT_UNIT_LIST_BUCKET` | `augusta-nexa-<env>-landing` | `user_managment_unit` source: the bucket the Genesys management units download writes to. Logical or full name. |
+| `MANAGEMENT_UNIT_LIST_BUCKET` | `augusta-nexa-<env>-landing` | `management_unit_list` source: the bucket the Genesys management units download writes to. Logical or full name. |
 | `MANAGEMENT_UNIT_LIST_PREFIX` | `funcionarios/genesys/api/management_unit_list/` | The folder holding the `org_id=<N>/year=/month=/day=` partitions. |
 
 ## Deployment

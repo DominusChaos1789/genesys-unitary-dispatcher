@@ -71,8 +71,8 @@ and deletes the transcription files it processed.
 | 2 | Execution id | The Lambda request id, or a UUID when there is no Lambda context. | `main.handler` |
 | 3 | Tags | `tag` (one) or `tags` (a list, or `"all"`), top-level or under `detail`. | `sources.resolve_tag_selection` |
 | 4 | Validate | Load `dispatcher.json` and the endpoint catalog. Expand `"all"` to every enabled flow with `id_kind` `"conversation"`, `"survey"` or `"transcript_session"`. For every tag: it must be declared and enabled in `dispatcher.json`, resolve its output-prefix key from its domain, and have endpoints for each stage it needs. Every tag is checked **here**, before any ids are read. | `dispatcher_config.load_dispatcher_config`, `dispatcher_config.conversation_tags`, `dispatcher_config.flow_config`, `dispatcher_config.output_base_path_key`, `endpoints.load_endpoint_catalog`, `endpoints.select_stages` |
-| 5 | Ids | With `"ids_source": "contracts"`: run the [contracts process](#contracts-process-where-surveys-ids-come-from) and group its conversation ids by organization. With `"ids_source": "conversations_details"`: read that `date`'s [conversation files](#conversations-download-ids-without-a-contract) per `org_id=` folder, once per distinct `id_kind` among the tags run. With `"ids_source": "user_managment_unit"`: read that `date`'s [management unit files](#genesys-management-units-download-ids-for-user_managment_unit) per `org_id=` folder. Otherwise from `event.organizations`, else the S3 file in `event.ids_location`, else the S3 object named in `event.detail`. Organizations merge, ids are de-duplicated and sorted, organizations without ids are dropped. For a `"transcript_event"` tag, whatever ids came out of the step above are then treated as event ids and resolved into `{conversationId, communicationId}` pairs by reading each one's file. | `main._resolve_ids`, `main._resolve_ids_by_kind`, `contracts_process.run_contracts`, `conversations_details.collect_survey_ids`, `conversations_details.collect_transcript_session_ids`, `management_units.collect_management_unit_ids`, `sources.resolve_ids_by_organization`, `transcript_events.resolve_transcript_events` |
-| 6 | Date | The event's `date`, when the run used `conversations_details` or `user_managment_unit`; otherwise today's date (UTC). Carried as a top-level `date` in every tag's payload file, whatever ids source it used. | `main.run` |
+| 5 | Ids | With `"ids_source": "contracts"`: run the [contracts process](#contracts-process-where-surveys-ids-come-from) and group its conversation ids by organization. With `"ids_source": "conversations_details"`: read that `date`'s [conversation files](#conversations-download-ids-without-a-contract) per `org_id=` folder, once per distinct `id_kind` among the tags run. With `"ids_source": "management_unit_list"`: read that `date`'s [management unit files](#genesys-management-units-download-ids-for-management_unit_list) per `org_id=` folder. Otherwise from `event.organizations`, else the S3 file in `event.ids_location`, else the S3 object named in `event.detail`. Organizations merge, ids are de-duplicated and sorted, organizations without ids are dropped. For a `"transcript_event"` tag, whatever ids came out of the step above are then treated as event ids and resolved into `{conversationId, communicationId}` pairs by reading each one's file. | `main._resolve_ids`, `main._resolve_ids_by_kind`, `contracts_process.run_contracts`, `conversations_details.collect_survey_ids`, `conversations_details.collect_transcript_session_ids`, `management_units.collect_management_unit_ids`, `sources.resolve_ids_by_organization`, `transcript_events.resolve_transcript_events` |
+| 6 | Date | The event's `date`, when the run used `conversations_details` or `management_unit_list`; otherwise today's date (UTC). Carried as a top-level `date` in every tag's payload file, whatever ids source it used. | `main.run` |
 | 7 | Genesys config | Once per run, and only if there are ids: `connection`, `servers`, `config` and the OAuth secrets. | `token_manager.load_config` |
 | 8 | Output prefix | Resolve each tag's output-prefix key (from step 4) against `config.output` (SSM). | `payload.output_base_path` |
 | 9 | Per organization | Find its `servers` entry → get its token (once, for every tag) → build its entry for each tag, one request template per stage. | `main._build_organizations`, `token_manager.get_token`, `payload.build_organization_entry` |
@@ -258,9 +258,9 @@ flowchart LR
 
 Not part of `"tags": "all"` -- see [dispatcher.json](#3-how-a-flow-is-defined).
 
-### Genesys management units download: ids for `user_managment_unit`
+### Genesys management units download: ids for `management_unit_list`
 
-`{"tag": "funcionarios_adherencia", "ids_source": "user_managment_unit", "date": "2026-08-13"}`
+`{"tag": "funcionarios_adherencia", "ids_source": "management_unit_list", "date": "2026-08-13"}`
 reads what a separate management-units download process left in the landing
 bucket for that day -- the same `org_id=`/date-partitioned layout
 conversations_details.py reads, just a different prefix and record shape.
@@ -286,7 +286,7 @@ and the 2 a.m. file both still work for `funcionarios_adherencia`.
 
 | | |
 |---|---|
-| Ids | management unit ids (`id_kind: "management_unit"`) -- inline, from the 2 a.m. file (`ids_location`/an S3 event), or from `ids_source: "user_managment_unit"`'s own day-partitioned download (see [below](#genesys-management-units-download-ids-for-user_managment_unit)) |
+| Ids | management unit ids (`id_kind: "management_unit"`) -- inline, from the 2 a.m. file (`ids_location`/an S3 event), or from `ids_source: "management_unit_list"`'s own day-partitioned download (see [below](#genesys-management-units-download-ids-for-management_unit_list)) |
 | Stages | `request_init`: `POST /api/v2/workforcemanagement/adherence/historical/bulk` → `request_status`: `GET .../bulk/jobs/{jobId}` |
 | Job size | one bulk job per management unit. The body has no `userIds`, so Genesys queries every user in the unit. |
 | Saved under | `funcionarios/genesys/api` |
@@ -389,7 +389,7 @@ them. Problems specific to one organization only affect that organization.
 | [src/contracts_process.py](../src/contracts_process.py) | the contracts process: per-contract loop, parquet writes, source deletion, ids by organization |
 | [src/landing_partitions.py](../src/landing_partitions.py) | shared `org_id=`/date-partitioned file walk used by conversations_details.py and management_units.py |
 | [src/conversations_details.py](../src/conversations_details.py) | ids from the Genesys conversations download: surveyIds/`{conversationId, communicationId}` pairs/conversationId |
-| [src/management_units.py](../src/management_units.py) | ids from the Genesys management units download (`user_managment_unit`): each record's `id` |
+| [src/management_units.py](../src/management_units.py) | ids from the Genesys management units download (`management_unit_list`): each record's `id` |
 | [src/transcript_events.py](../src/transcript_events.py) | resolves `transcript_events`' event ids into `{conversationId, communicationId}` pairs, one real-time event file at a time |
 | [src/contract.py](../src/contract.py) | the contract model; contract discovery and loading |
 | [src/transform.py](../src/transform.py) | source record → business row: rename, cast, transformations, dedup |

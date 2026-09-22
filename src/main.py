@@ -30,7 +30,7 @@ Ids sources:
   Finished surveyIds, (conversationId, communicationId) session pairs, or the
   conversation ids themselves, depending on the tag's id_kind
   (conversations_details.py). Those files are left untouched.
-- "user_managment_unit": management unit ids the Genesys management units
+- "management_unit_list": management unit ids the Genesys management units
   download left in the landing bucket for the event's `date`, grouped by
   their org_id= folder, same layout as conversations_details
   (management_units.py). For funcionarios_adherencia, as an alternative to
@@ -103,8 +103,8 @@ logger.setLevel(logging.INFO)
 
 CONTRACTS_IDS_SOURCE = "contracts"
 CONVERSATIONS_DETAILS_IDS_SOURCE = "conversations_details"
-USER_MANAGMENT_UNIT_IDS_SOURCE = "user_managment_unit"
-IDS_SOURCES = (CONTRACTS_IDS_SOURCE, CONVERSATIONS_DETAILS_IDS_SOURCE, USER_MANAGMENT_UNIT_IDS_SOURCE)
+MANAGEMENT_UNIT_LIST_IDS_SOURCE = "management_unit_list"
+IDS_SOURCES = (CONTRACTS_IDS_SOURCE, CONVERSATIONS_DETAILS_IDS_SOURCE, MANAGEMENT_UNIT_LIST_IDS_SOURCE)
 
 
 def _server_key(organization_id: str) -> str:
@@ -168,7 +168,7 @@ def _resolve_ids(s3_client, settings: Settings, event: dict, execution_id: str, 
             outcome["summary"],
             ids_source,
         )
-    elif ids_source == USER_MANAGMENT_UNIT_IDS_SOURCE:
+    elif ids_source == MANAGEMENT_UNIT_LIST_IDS_SOURCE:
         day = parse_date(event.get("date"), ids_source)
         outcome = collect_management_unit_ids(s3_client, settings, day)
         ids_by_organization, summary, summary_key = (

@@ -84,7 +84,7 @@ def build_organization_payload(
     """The file Unitary Status and Unitary Download read for one organization:
     a flat object, no "organization" array. `date` is the run's date --
     `event["date"]` for a run sourced by `conversations_details` or
-    `user_managment_unit`, otherwise the day the run happened (main.run).
+    `management_unit_list`, otherwise the day the run happened (main.run).
     Organizations that couldn't be served in this run are listed with their
     ids under `failed_organizations` (the same list in every organization's
     file for this tag), so a re-run has them even though this file's own

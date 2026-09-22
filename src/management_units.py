@@ -9,7 +9,7 @@ conversations_details.py reads (see landing_partitions.py):
 
 Each file is {"endpoint": [{"id": ..., "name": ..., "businessUnit": {...},
 "division": {...}, "selfUri": ...}, ...], "status": "success"}. For a run
-with `"ids_source": "user_managment_unit"` and `"date": "YYYY-MM-DD"`, this
+with `"ids_source": "management_unit_list"` and `"date": "YYYY-MM-DD"`, this
 reads that day's files for every organization and collects each management
 unit's `id`. Unlike the contracts process there is nothing to transform or
 write: the ids only feed the payload, and the files are never modified or

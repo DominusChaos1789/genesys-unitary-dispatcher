@@ -10,7 +10,7 @@ from test.conftest import LANDING_BUCKET, payload_by_org
 PREFIX = "funcionarios/genesys/api/management_unit_list/"
 DAY = "2026-08-13"
 DAY_PATH = "year=2026/month=08/day=13/"
-EVENT = {"tag": "funcionarios_adherencia", "ids_source": "user_managment_unit", "date": DAY}
+EVENT = {"tag": "funcionarios_adherencia", "ids_source": "management_unit_list", "date": DAY}
 
 
 def _context(request_id: str = "req-mu"):
@@ -44,7 +44,7 @@ def test_management_unit_ids_are_read_per_organization_for_the_event_date(aws):
     organizations = _by_org(result)
     assert organizations["org-1"]["ids"] == ["mu-a", "mu-b"]
     assert organizations["org-3"]["ids"] == ["mu-c"]
-    assert result["user_managment_unit"] == {
+    assert result["management_unit_list"] == {
         "date": DAY,
         "bucket": LANDING_BUCKET,
         "files_read": 2,
@@ -75,14 +75,14 @@ def test_unreadable_or_unexpected_files_are_skipped_and_reported(aws):
     result = run(EVENT, _context())
 
     assert _by_org(result)["org-1"]["ids"] == ["mu-a"]
-    assert result["user_managment_unit"]["files_read"] == 1
-    assert sorted(result["user_managment_unit"]["skipped_files"]) == sorted([empty, no_endpoint])
+    assert result["management_unit_list"]["files_read"] == 1
+    assert sorted(result["management_unit_list"]["skipped_files"]) == sorted([empty, no_endpoint])
 
 
 def test_the_date_is_required_as_yyyy_mm_dd(aws):
-    event = {"tag": "funcionarios_adherencia", "ids_source": "user_managment_unit"}
+    event = {"tag": "funcionarios_adherencia", "ids_source": "management_unit_list"}
 
-    with pytest.raises(EventError, match='ids_source "user_managment_unit" needs "date" as YYYY-MM-DD'):
+    with pytest.raises(EventError, match='ids_source "management_unit_list" needs "date" as YYYY-MM-DD'):
         run(event, _context())
 
 
@@ -90,5 +90,5 @@ def test_a_day_without_files_produces_an_empty_payload_without_touching_genesys(
     result = run(EVENT, _context())
 
     assert result["responses"] == []
-    assert result["user_managment_unit"]["files_read"] == 0
+    assert result["management_unit_list"]["files_read"] == 0
     assert genesys_api["load_config"] == []

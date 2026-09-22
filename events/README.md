@@ -25,7 +25,7 @@ touch nothing, and `06` deletes files.
 The handler always returns a **list**, one entry per (tag, organization) pair
 that got a payload file — even for these single-organization events. Every
 payload file also carries a top-level `date`: the event's own `date` for
-`03`–`05` and `17` (`conversations_details`/`user_managment_unit`), otherwise
+`03`–`05` and `17` (`conversations_details`/`management_unit_list`), otherwise
 the day the run happened.
 
 | Event | What it does | Side effects | Expected response |

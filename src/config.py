@@ -85,7 +85,7 @@ class Settings:
     # the real-time conversation-event process writes to.
     conversations_events_bucket: str
     conversations_events_prefix: str
-    # ids_source "user_managment_unit" (funcionarios_adherencia): the bucket
+    # ids_source "management_unit_list" (funcionarios_adherencia): the bucket
     # and prefix the Genesys management units download writes to.
     management_unit_list_bucket: str
     management_unit_list_prefix: str
