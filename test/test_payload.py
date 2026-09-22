@@ -81,19 +81,33 @@ def test_organization_entry_has_ids_then_one_key_per_stage():
     assert entry["request_init"]["url"] == "/init"
 
 
-def test_organization_payload_is_flat_tag_first_then_the_entry_then_failures():
+def test_organization_payload_is_flat_tag_date_then_the_entry_then_failures():
     entry = {"organization_id": "org-1", "ids": ["a"], "request_context": {"url": "/x"}}
 
-    payload = build_organization_payload("surveys", entry)
+    payload = build_organization_payload("surveys", entry, date="2026-08-13")
 
-    assert list(payload) == ["tag", "organization_id", "ids", "request_context", "failed_organizations"]
+    assert list(payload) == [
+        "tag",
+        "date",
+        "organization_id",
+        "ids",
+        "request_context",
+        "failed_organizations",
+    ]
     assert payload == {
         "tag": "surveys",
+        "date": "2026-08-13",
         "organization_id": "org-1",
         "ids": ["a"],
         "request_context": {"url": "/x"},
         "failed_organizations": [],
     }
+
+
+def test_organization_payload_date_defaults_to_none():
+    entry = {"organization_id": "org-1", "ids": ["a"]}
+
+    assert build_organization_payload("surveys", entry)["date"] is None
 
 
 def test_organization_payload_lists_failed_organizations_with_their_ids():

@@ -78,10 +78,15 @@ def build_organization_payload(
     tag: str,
     entry: dict[str, Any],
     failed_organizations: list[dict[str, Any]] | None = None,
+    *,
+    date: str | None = None,
 ) -> dict[str, Any]:
     """The file Unitary Status and Unitary Download read for one organization:
-    a flat object, no "organization" array. Organizations that couldn't be
-    served in this run are listed with their ids under `failed_organizations`
-    (the same list in every organization's file for this tag), so a re-run
-    has them even though this file's own organization is a successful one."""
-    return {"tag": tag, **entry, "failed_organizations": failed_organizations or []}
+    a flat object, no "organization" array. `date` is the run's date --
+    `event["date"]` for a run sourced by `conversations_details` or
+    `user_managment_unit`, otherwise the day the run happened (main.run).
+    Organizations that couldn't be served in this run are listed with their
+    ids under `failed_organizations` (the same list in every organization's
+    file for this tag), so a re-run has them even though this file's own
+    organization is a successful one."""
+    return {"tag": tag, "date": date, **entry, "failed_organizations": failed_organizations or []}

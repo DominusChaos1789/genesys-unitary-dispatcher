@@ -84,7 +84,14 @@ def test_the_payload_file_is_flat_with_no_organization_array(aws):
     response = next(r for r in responses if r["organization_id"] == "org-1")
 
     written = _read(aws["s3"], response)
-    assert set(written) == {"tag", "organization_id", "ids", "request_context", "failed_organizations"}
+    assert set(written) == {
+        "tag",
+        "date",
+        "organization_id",
+        "ids",
+        "request_context",
+        "failed_organizations",
+    }
     assert written["organization_id"] == "org-1"
     assert written["ids"] == ["conv-1"]
     assert written["request_context"]["url"] == "/api/v2/quality/surveys/{surveyId}"

@@ -163,3 +163,22 @@ def test_conversations_events_overrides(monkeypatch):
 
     assert settings.conversations_events_bucket == "augusta-nexa-dev-landing-archive"
     assert settings.conversations_events_prefix == "other/events/"
+
+
+def test_management_unit_list_defaults_follow_the_environment(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "stg")
+
+    settings = load_settings()
+
+    assert settings.management_unit_list_bucket == "augusta-nexa-stg-landing"
+    assert settings.management_unit_list_prefix == "funcionarios/genesys/api/management_unit_list/"
+
+
+def test_management_unit_list_overrides(monkeypatch):
+    monkeypatch.setenv("MANAGEMENT_UNIT_LIST_BUCKET", "augusta-nexa-dev-landing-archive")
+    monkeypatch.setenv("MANAGEMENT_UNIT_LIST_PREFIX", "other/mus/")
+
+    settings = load_settings()
+
+    assert settings.management_unit_list_bucket == "augusta-nexa-dev-landing-archive"
+    assert settings.management_unit_list_prefix == "other/mus/"

@@ -1,5 +1,6 @@
 import json
 import re
+from datetime import date
 from types import SimpleNamespace
 
 import pytest
@@ -20,6 +21,7 @@ from test.conftest import (
 )
 
 PAYLOAD_PREFIX = "transacciones/genesys/api/payload_request_unitary"
+RUN_DATE = date(2026, 8, 13)
 TWO_ORGS = [
     {"organization_id": "org-3", "ids": ["conv-3b", "conv-3a"]},
     {"organization_id": "org-1", "ids": ["conv-1a"]},
@@ -56,7 +58,7 @@ def _add_recordings_flow(s3) -> None:
 
 
 def test_surveys_writes_one_flat_file_per_organization(aws, genesys_api):
-    result = run({"tag": "surveys", "organizations": TWO_ORGS}, _context())
+    result = run({"tag": "surveys", "organizations": TWO_ORGS}, _context(), today=RUN_DATE)
 
     assert result["tags"] == ["surveys"]
     assert result["failed_organizations"] == []
@@ -83,6 +85,7 @@ def test_surveys_writes_one_flat_file_per_organization(aws, genesys_api):
     # The file itself is flat: no "organization" array to unpack.
     assert read_payload(result, organization_id="org-3") == {
         "tag": "surveys",
+        "date": RUN_DATE.isoformat(),
         "organization_id": "org-3",
         "ids": ["conv-3a", "conv-3b"],
         "failed_organizations": [],
@@ -101,6 +104,18 @@ def test_surveys_writes_one_flat_file_per_organization(aws, genesys_api):
     }
     assert genesys_api["load_config"] == [("/augusta-nexa-dev/genesys/api", "us-east-2")]
     assert genesys_api["resource_name"] == "augusta-nexa-dev-genesys-api-unitary-request"
+
+
+def test_the_payload_date_defaults_to_today_when_the_event_has_no_date(aws):
+    pinned_today = date(2027, 3, 4)
+
+    result = run(
+        {"tag": "surveys", "organizations": [{"organization_id": "org-1", "ids": ["conv-1"]}]},
+        _context(),
+        today=pinned_today,
+    )
+
+    assert read_payload(result)["date"] == "2027-03-04"
 
 
 def test_the_response_carries_locations_never_the_payload(aws):
@@ -217,7 +232,14 @@ def test_payload_file_is_written_under_tag_and_organization(aws):
     key = f"{PAYLOAD_PREFIX}/surveys/org-1.json"
     assert responses_for(result)[0]["payload_location"] == key
     written = json.loads(aws["s3"].get_object(Bucket=LOGS_BUCKET, Key=key)["Body"].read())
-    assert set(written) == {"tag", "organization_id", "ids", "request_context", "failed_organizations"}
+    assert set(written) == {
+        "tag",
+        "date",
+        "organization_id",
+        "ids",
+        "request_context",
+        "failed_organizations",
+    }
     assert written["tag"] == "surveys"
     assert written["failed_organizations"] == []
 

@@ -178,6 +178,22 @@ deleted: they belong to the download process. Files that can't be read, or
 that have no `endpoint` list, are skipped and listed in
 `conversations_details.skipped_files`. `date` is required, as `YYYY-MM-DD`.
 
+### Ids from the Genesys management units download
+
+```json
+{"tag": "funcionarios_adherencia", "ids_source": "user_managment_unit", "date": "2026-08-13"}
+```
+
+An alternative to `ids_location`/an S3 event for `funcionarios_adherencia`,
+when the management units aren't already grouped by organization in one
+file. A separate process downloads the management unit list into
+`augusta-nexa-<env>-landing/funcionarios/genesys/api/management_unit_list/org_id=<N>/year=YYYY/month=MM/day=DD/`
+-- the same layout as the conversations download. The run reads that
+`date`'s files for every `org_id=` folder and collects each `endpoint[]`
+record's `id` (`management_units.py`). Files that can't be read, or that
+have no `endpoint` list, are skipped and listed in
+`user_managment_unit.skipped_files`. `date` is required, as `YYYY-MM-DD`.
+
 An unknown `ids_source` value fails the run before any file is touched.
 
 ### Ids from real-time conversation events (`transcript_events`)
@@ -210,6 +226,7 @@ unpack, so a Step Function can read one file straight into a Map state:
 ```json
 {
   "tag": "funcionarios_adherencia",
+  "date": "2026-08-13",
   "organization_id": "org-1",
   "ids": ["<management unit id>", "..."],
   "request_init": {
@@ -234,6 +251,9 @@ unpack, so a Step Function can read one file straight into a Map state:
   the `Authorization` header (token). Per-id placeholders — `{surveyId}`,
   `{conversationId}`, `{communicationId}`, `{mu_id}`, `{jobId}`,
   `{star_date}`, `{end_date}` — are left for Status/Download to fill per call.
+- `date` is `event["date"]` for a run sourced by `conversations_details` or
+  `user_managment_unit`, otherwise the day the run happened (UTC) — every
+  tag's payload carries it, not just the date-driven ones.
 
 transcripts' `entry["ids"]` are `{conversationId, communicationId}` objects
 (not plain strings), and its one stage renders straight from them — there's
@@ -242,6 +262,7 @@ no preceding call to fill `{communicationId}` from:
 ```json
 {
   "tag": "transcripts",
+  "date": "2026-09-21",
   "organization_id": "org-1",
   "ids": [{"conversationId": "79b342f9-...", "communicationId": "5363b9e1-..."}],
   "request_url": {
@@ -393,6 +414,8 @@ All optional.
 | `CONVERSATIONS_DETAILS_PREFIX` | `transacciones/genesys/api/conversations_details/` | The folder holding the `org_id=<N>/year=/month=/day=` partitions. |
 | `CONVERSATIONS_EVENTS_BUCKET` | `augusta-nexa-<env>-landing` | `transcript_events` source: the bucket the real-time event process writes to. Logical or full name. |
 | `CONVERSATIONS_EVENTS_PREFIX` | `transacciones/genesys/events/` | The folder holding the `org_id=<N>/<event_id>.json` files (no date partitioning). |
+| `MANAGEMENT_UNIT_LIST_BUCKET` | `augusta-nexa-<env>-landing` | `user_managment_unit` source: the bucket the Genesys management units download writes to. Logical or full name. |
+| `MANAGEMENT_UNIT_LIST_PREFIX` | `funcionarios/genesys/api/management_unit_list/` | The folder holding the `org_id=<N>/year=/month=/day=` partitions. |
 
 ## Deployment
 

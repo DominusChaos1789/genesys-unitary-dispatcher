@@ -20,6 +20,9 @@ CONVERSATIONS_DETAILS_KEY = (
 )
 MANAGEMENT_UNITS_KEY = "funcionarios/genesys/api/management_units/2026-08-13.json"
 TRANSCRIPT_EVENT_KEY = "transacciones/genesys/events/org_id=1/00000000-0000-4000-8000-000000000003.json"
+MANAGEMENT_UNIT_LIST_KEY = (
+    "funcionarios/genesys/api/management_unit_list/org_id=1/year=2026/month=08/day=13/units.json"
+)
 
 # event file -> {(tag, organization_id): id_count} for every payload file the run must write.
 SUCCEEDS = {
@@ -36,6 +39,7 @@ SUCCEEDS = {
     "09-eventbridge-s3.json": {("funcionarios_adherencia", "org-1"): 1},
     "15-transcripts-inline.json": {("transcripts", "org-1"): 1},
     "16-transcript-events.json": {("transcript_events", "org-1"): 1},
+    "17-adherence-mu-list.json": {("funcionarios_adherencia", "org-1"): 2},
 }
 # event file -> error message the run must fail with
 FAILS = {
@@ -77,6 +81,11 @@ def seeded_landing(aws, seeded_source_files):
                 }
             }
         ),
+    )
+    s3.put_object(
+        Bucket=LANDING_BUCKET,
+        Key=MANAGEMENT_UNIT_LIST_KEY,
+        Body=json.dumps({"endpoint": [{"id": "mu-1", "name": "MU_ONE"}, {"id": "mu-2", "name": "MU_TWO"}]}),
     )
     return s3
 

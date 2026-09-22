@@ -23,7 +23,10 @@ Run them roughly in this order: the first ones need the fewest permissions and
 touch nothing, and `06` deletes files.
 
 The handler always returns a **list**, one entry per (tag, organization) pair
-that got a payload file — even for these single-organization events.
+that got a payload file — even for these single-organization events. Every
+payload file also carries a top-level `date`: the event's own `date` for
+`03`–`05` and `17` (`conversations_details`/`user_managment_unit`), otherwise
+the day the run happened.
 
 | Event | What it does | Side effects | Expected response |
 |---|---|---|---|
@@ -38,6 +41,7 @@ that got a payload file — even for these single-organization events.
 | `09-eventbridge-s3` | the S3 "Object Created" event EventBridge would send for that file | reads the file | same as 07 |
 | `15-transcripts-inline` | transcripts for one `{conversationId, communicationId}` pair sent in the event | token + payload | list of 1: `stages: ["request_url"]` |
 | `16-transcript-events` | transcript_events for one real-time event id sent in the event | reads that event's file under `.../genesys/events/` (never deletes it) | list of 1: `stages: ["request_url"]` |
+| `17-adherence-mu-list` | adherence for every management unit downloaded on 2026-08-13 | reads the landing files (never deletes them) | list with one entry per `org_id=` folder with files that day |
 | `06-surveys-contracts` | the hourly contracts process, then surveys | ⚠️ **writes parquet to refined and deletes the processed transcription files in providers-landing** | list with one entry per contract's organization; contract counts are in the `Run summary` log line |
 
 Every successful run writes one **flat** file per (tag, organization) pair to a
@@ -57,6 +61,8 @@ the `Run summary` log line for the per-organization counts.
   `augusta-nexa-dev-landing/transacciones/genesys/api/conversations_details/org_id=<N>/year=/month=/day=/`.
   A full day is dozens of files per organization; if the run times out, raise the
   function timeout (dev is 60 s) before reading anything into the result.
+- **`17`**: change `date` to a day that has files under
+  `augusta-nexa-dev-landing/funcionarios/genesys/api/management_unit_list/org_id=<N>/year=/month=/day=/`.
 - **`07`**: replace `REPLACE_WITH_MU_ID` with a real management unit id.
 - **`15`**: its `ids` entry is a `{conversationId, communicationId}` object,
   not a plain string (transcripts' `id_kind` is `"transcript_session"`) --

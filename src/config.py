@@ -27,6 +27,9 @@ DEFAULT_CONVERSATIONS_DETAILS_PREFIX = "transacciones/genesys/api/conversations_
 # event: <prefix>org_id=<N>/<event_id>.json -- no date partitioning, since
 # events arrive continuously rather than once a day.
 DEFAULT_CONVERSATIONS_EVENTS_PREFIX = "transacciones/genesys/events/"
+# Where the Genesys management units download leaves its files, same layout
+# as the conversations download: <prefix>org_id=<N>/year=YYYY/month=MM/day=DD/*.json
+DEFAULT_MANAGEMENT_UNIT_LIST_PREFIX = "funcionarios/genesys/api/management_unit_list/"
 
 
 def normalize_env_token(value: str) -> str:
@@ -82,6 +85,10 @@ class Settings:
     # the real-time conversation-event process writes to.
     conversations_events_bucket: str
     conversations_events_prefix: str
+    # ids_source "user_managment_unit" (funcionarios_adherencia): the bucket
+    # and prefix the Genesys management units download writes to.
+    management_unit_list_bucket: str
+    management_unit_list_prefix: str
 
     def resolve_bucket(self, name: str) -> str:
         """ "landing" -> "augusta-nexa-dev-landing"; full names pass through."""
@@ -123,5 +130,9 @@ def load_settings() -> Settings:
         conversations_events_bucket=bucket("CONVERSATIONS_EVENTS_BUCKET", "landing"),
         conversations_events_prefix=os.environ.get(
             "CONVERSATIONS_EVENTS_PREFIX", DEFAULT_CONVERSATIONS_EVENTS_PREFIX
+        ),
+        management_unit_list_bucket=bucket("MANAGEMENT_UNIT_LIST_BUCKET", "landing"),
+        management_unit_list_prefix=os.environ.get(
+            "MANAGEMENT_UNIT_LIST_PREFIX", DEFAULT_MANAGEMENT_UNIT_LIST_PREFIX
         ),
     )

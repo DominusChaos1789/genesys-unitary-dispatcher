@@ -30,6 +30,17 @@ Ids sources:
   Finished surveyIds, (conversationId, communicationId) session pairs, or the
   conversation ids themselves, depending on the tag's id_kind
   (conversations_details.py). Those files are left untouched.
+- "user_managment_unit": management unit ids the Genesys management units
+  download left in the landing bucket for the event's `date`, grouped by
+  their org_id= folder, same layout as conversations_details
+  (management_units.py). For funcionarios_adherencia, as an alternative to
+  `ids_location`/an S3 event when the units aren't already grouped by
+  organization in one file.
+
+Every organization's payload also carries a top-level `date`: the event's
+`date` when the run used one of the two sources above, otherwise today's date
+(UTC) -- the day the run happened, since inline/contracts-sourced runs have
+no `date` of their own.
 
 transcript_events (id_kind "transcript_event") is a further step on top of
 whichever ids source above supplied its ids (normally the event's own inline
@@ -58,6 +69,7 @@ no file for this run. Every other organization's file lists it under
 import json
 import logging
 import uuid
+from datetime import date as date_
 
 import boto3
 
@@ -80,6 +92,7 @@ from src.dispatcher_config import (
     output_base_path_key,
 )
 from src.endpoints import load_endpoint_catalog, select_stages
+from src.management_units import collect_management_unit_ids
 from src.payload import build_organization_entry, build_organization_payload, output_base_path
 from src.sources import ALL_TAGS, EventError, resolve_ids_by_organization, resolve_tag_selection
 from src.token_manager import get_token, load_config
@@ -90,7 +103,8 @@ logger.setLevel(logging.INFO)
 
 CONTRACTS_IDS_SOURCE = "contracts"
 CONVERSATIONS_DETAILS_IDS_SOURCE = "conversations_details"
-IDS_SOURCES = (CONTRACTS_IDS_SOURCE, CONVERSATIONS_DETAILS_IDS_SOURCE)
+USER_MANAGMENT_UNIT_IDS_SOURCE = "user_managment_unit"
+IDS_SOURCES = (CONTRACTS_IDS_SOURCE, CONVERSATIONS_DETAILS_IDS_SOURCE, USER_MANAGMENT_UNIT_IDS_SOURCE)
 
 
 def _server_key(organization_id: str) -> str:
@@ -142,13 +156,21 @@ def _resolve_ids(s3_client, settings: Settings, event: dict, execution_id: str, 
             ids_source,
         )
     elif ids_source == CONVERSATIONS_DETAILS_IDS_SOURCE:
-        day = parse_date(event.get("date"))
+        day = parse_date(event.get("date"), ids_source)
         if id_kind == SURVEY_ID_KIND:
             outcome = collect_survey_ids(s3_client, settings, day)
         elif id_kind == TRANSCRIPT_SESSION_ID_KIND:
             outcome = collect_transcript_session_ids(s3_client, settings, day)
         else:
             outcome = collect_conversation_ids(s3_client, settings, day)
+        ids_by_organization, summary, summary_key = (
+            outcome["ids_by_organization"],
+            outcome["summary"],
+            ids_source,
+        )
+    elif ids_source == USER_MANAGMENT_UNIT_IDS_SOURCE:
+        day = parse_date(event.get("date"), ids_source)
+        outcome = collect_management_unit_ids(s3_client, settings, day)
         ids_by_organization, summary, summary_key = (
             outcome["ids_by_organization"],
             outcome["summary"],
@@ -278,6 +300,7 @@ def _write_payloads(
     stages_by_tag: dict[str, dict[str, tuple[str, dict]]],
     organizations_by_tag: dict[str, list[dict]],
     failed: list[dict],
+    run_date: str,
 ) -> list[dict]:
     """Writes one flat file per (tag, organization) pair -- overwriting
     whatever was there from a previous run -- and returns, for each one, only
@@ -300,7 +323,7 @@ def _write_payloads(
         for entry in entries:
             organization_id = entry["organization_id"]
             key = settings.payload_log_key(tag, organization_id)
-            payload = build_organization_payload(tag, entry, failed_for_files)
+            payload = build_organization_payload(tag, entry, failed_for_files, date=run_date)
             s3_utils.write_json(s3_client, settings.payload_log_bucket, key, payload)
             logger.info(
                 "Wrote %s/%s payload to s3://%s/%s", tag, organization_id, settings.payload_log_bucket, key
@@ -332,13 +355,18 @@ def handler(event, context):
     return result["responses"]
 
 
-def run(event, context) -> dict:
+def run(event, context, *, today: date_ | None = None) -> dict:
     """The whole dispatch: validate the tags against dispatcher.json and the
     endpoint catalog, resolve the ids, build and write one payload file per
-    (tag, organization) pair. Returns the detailed summary the handler logs."""
+    (tag, organization) pair. Returns the detailed summary the handler logs.
+
+    `today`, like `token_manager.get_token`'s `now`, is only for tests to pin
+    the date a run without its own `event["date"]` falls back to.
+    """
     settings = load_settings()
     s3_client = boto3.client("s3")
     execution_id = getattr(context, "aws_request_id", None) or str(uuid.uuid4())
+    run_date = event.get("date") or (today or date_.today()).isoformat()
 
     selection = resolve_tag_selection(event)
     catalog = load_endpoint_catalog(s3_client, settings)
@@ -365,11 +393,12 @@ def run(event, context) -> dict:
     organizations_by_tag, failed = _build_organizations(
         settings, stages_by_tag, base_path_keys, id_kinds_by_tag, ids_by_kind
     )
-    responses = _write_payloads(s3_client, settings, stages_by_tag, organizations_by_tag, failed)
+    responses = _write_payloads(s3_client, settings, stages_by_tag, organizations_by_tag, failed, run_date)
 
     result = {
         "execution_id": execution_id,
         "tags": tags,
+        "date": run_date,
         "responses": responses,
         "failed_organizations": [
             {"organization_id": f["organization_id"], "id_count": len(f["ids"]), "error": f["error"]}
