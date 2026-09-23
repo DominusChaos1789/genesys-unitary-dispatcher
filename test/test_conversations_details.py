@@ -46,12 +46,18 @@ def _details(*survey_ids) -> dict:
 
 
 def _transcript_details(*pairs) -> dict:
-    """A conversations_details file with one participant session per given
+    """A conversations_details file with one recorded voice session per given
     (conversationId, communicationId) pair -- transcripts' id_kind is
-    "transcript_session"."""
+    "transcript_session", and only `recording: true` + `mediaType: "voice"`
+    sessions qualify."""
     return {
         "endpoint": [
-            {"conversationId": conversation_id, "participants": [{"sessions": [{"sessionId": session_id}]}]}
+            {
+                "conversationId": conversation_id,
+                "participants": [
+                    {"sessions": [{"sessionId": session_id, "recording": True, "mediaType": "voice"}]}
+                ],
+            }
             for conversation_id, session_id in pairs
         ]
     }
@@ -139,6 +145,7 @@ def test_transcripts_reads_conversation_session_pairs_off_the_same_records(aws):
         for c in load_fixture("conversations_details_sample.json")["endpoint"]
         for participant in c.get("participants", [])
         for session in participant.get("sessions", [])
+        if session.get("recording") is True and session.get("mediaType") == "voice"
     )
     expected = [{"conversationId": cid, "communicationId": sid} for cid, sid in sample_pairs]
 
@@ -149,6 +156,9 @@ def test_transcripts_reads_conversation_session_pairs_off_the_same_records(aws):
 
 
 def test_a_conversation_with_several_sessions_yields_a_pair_per_session(aws):
+    def _session(session_id):
+        return {"sessionId": session_id, "recording": True, "mediaType": "voice"}
+
     _put(
         aws["s3"],
         f"{PREFIX}org_id=1/{DAY_PATH}multi.json",
@@ -157,8 +167,8 @@ def test_a_conversation_with_several_sessions_yields_a_pair_per_session(aws):
                 {
                     "conversationId": "conv-1",
                     "participants": [
-                        {"sessions": [{"sessionId": "s1"}, {"sessionId": "s2"}]},
-                        {"sessions": [{"sessionId": "s3"}]},
+                        {"sessions": [_session("s1"), _session("s2")]},
+                        {"sessions": [_session("s3")]},
                     ],
                 }
             ]
@@ -172,6 +182,34 @@ def test_a_conversation_with_several_sessions_yields_a_pair_per_session(aws):
         {"conversationId": "conv-1", "communicationId": "s2"},
         {"conversationId": "conv-1", "communicationId": "s3"},
     ]
+
+
+def test_only_recorded_voice_sessions_are_collected(aws):
+    body = {
+        "endpoint": [
+            {
+                "conversationId": "conv-1",
+                "participants": [
+                    # Qualifies: recorded voice.
+                    {"sessions": [{"sessionId": "s-voice", "recording": True, "mediaType": "voice"}]},
+                    # Not recorded.
+                    {"sessions": [{"sessionId": "s-not-recorded", "recording": False, "mediaType": "voice"}]},
+                    # Recording flag missing entirely (e.g. ivr/acd routing legs).
+                    {"sessions": [{"sessionId": "s-no-recording-field", "mediaType": "voice"}]},
+                    # Recorded, but not voice.
+                    {"sessions": [{"sessionId": "s-chat", "recording": True, "mediaType": "chat"}]},
+                    # "recording" isn't a real JSON boolean -- a stray truthy
+                    # value shouldn't slip past a strict `is True` check.
+                    {"sessions": [{"sessionId": "s-truthy", "recording": "true", "mediaType": "voice"}]},
+                ],
+            }
+        ]
+    }
+    _put(aws["s3"], f"{PREFIX}org_id=1/{DAY_PATH}filter.json", body)
+
+    result = run({"tag": "transcripts", "ids_source": "conversations_details", "date": DAY}, _context())
+
+    assert _by_org(result)["org-1"]["ids"] == [{"conversationId": "conv-1", "communicationId": "s-voice"}]
 
 
 def test_unreadable_transcript_files_are_skipped_and_reported(aws):
@@ -191,9 +229,17 @@ def test_malformed_transcript_records_are_ignored(aws):
         "endpoint": [
             {
                 "conversationId": "c1",
-                "participants": [{"sessions": [{"sessionId": "s1"}]}, "not-a-participant"],
+                "participants": [
+                    {"sessions": [{"sessionId": "s1", "recording": True, "mediaType": "voice"}]},
+                    "not-a-participant",
+                ],
             },
-            {"conversationId": "", "participants": [{"sessions": [{"sessionId": "s2"}]}]},
+            {
+                "conversationId": "",
+                "participants": [
+                    {"sessions": [{"sessionId": "s2", "recording": True, "mediaType": "voice"}]}
+                ],
+            },
             "not-an-object",
         ]
     }

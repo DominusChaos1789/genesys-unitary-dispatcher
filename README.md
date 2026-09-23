@@ -169,9 +169,13 @@ depends on the tag's `id_kind`:
   conversation itself, so Expired/other-status surveys and conversations with
   none are skipped.
 - `"transcript_session"` (transcripts) — one `{conversationId,
-  communicationId}` pair per participant session on the conversation
-  (`participants[].sessions[].sessionId` → `communicationId`). A conversation
-  with several sessions yields several pairs.
+  communicationId}` pair per **recorded voice** participant session on the
+  conversation (`participants[].sessions[].sessionId` → `communicationId`,
+  kept only when that session's `recording` is `true` and `mediaType` is
+  `"voice"`). A conversation with several qualifying sessions yields several
+  pairs; its other sessions (ivr, acd routing, ...) have no transcript to
+  fetch and are skipped, so they don't multiply the volume the downstream
+  Lambdas have to process.
 
 Nothing is transformed or written, and the files are never modified or
 deleted: they belong to the download process. Files that can't be read, or

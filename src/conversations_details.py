@@ -17,10 +17,13 @@ tag's id_kind:
   `conversations_surveys_result` (`/api/v2/quality/surveys/{surveyId}`), not
   the conversation itself.
 - "transcript_session" (transcripts): one (conversationId, communicationId)
-  pair per participant session on the conversation -- a single conversation
-  can have several, since `transcripts_url`
+  pair per **recorded voice** participant session on the conversation --
+  `recording: true` and `mediaType: "voice"` -- since `transcripts_url`
   (`/api/v2/speechandtextanalytics/conversations/{conversationId}/communications/{communicationId}/transcripturl`)
-  needs both ids and a conversation can carry more than one communication.
+  needs both ids and only a recorded voice session has a transcript to fetch.
+  A conversation can carry more than one qualifying communication; its other,
+  non-recorded sessions (ivr, acd routing, ...) are skipped so they don't
+  multiply the volume downstream Lambdas process for nothing.
 
 Unlike the contracts process there is nothing to transform or write: the ids
 only feed the payload. The files belong to the download process, so they are
@@ -81,8 +84,12 @@ def _survey_ids(document) -> list[str]:
 
 
 def _transcript_session_pairs(document) -> list[tuple[str, str]]:
-    """One (conversationId, sessionId) pair per participant session -- a
-    conversation with several communications yields several pairs."""
+    """One (conversationId, sessionId) pair per recorded voice session -- a
+    conversation with several qualifying communications yields several pairs.
+    Only sessions with `recording: true` and `mediaType: "voice"` count:
+    the other, non-recorded sessions (ivr, acd routing, ...) on the same
+    conversation have no transcript to fetch, and would otherwise multiply
+    the volume the downstream Lambdas have to process for no reason."""
     pairs = []
     for c in _conversations(document):
         if not isinstance(c, dict) or not c.get("conversationId"):
@@ -91,7 +98,12 @@ def _transcript_session_pairs(document) -> list[tuple[str, str]]:
             if not isinstance(participant, dict):
                 continue
             for session in participant.get("sessions") or []:
-                if isinstance(session, dict) and session.get("sessionId"):
+                if (
+                    isinstance(session, dict)
+                    and session.get("sessionId")
+                    and session.get("recording") is True
+                    and session.get("mediaType") == "voice"
+                ):
                     pairs.append((c["conversationId"], session["sessionId"]))
     return pairs
 

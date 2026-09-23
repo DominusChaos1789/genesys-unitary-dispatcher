@@ -171,7 +171,7 @@ steps 1-2, both S3 edits.
 
 | | |
 |---|---|
-| Ids | `{conversationId, communicationId}` pairs (`id_kind: "transcript_session"`) -- one per participant session on a conversation record, read off the same conversations_details files surveys reads |
+| Ids | `{conversationId, communicationId}` pairs (`id_kind: "transcript_session"`) -- one per **recorded voice** participant session (`recording: true`, `mediaType: "voice"`) on a conversation record, read off the same conversations_details files surveys reads; other sessions (ivr, acd routing, ...) have no transcript to fetch and are dropped |
 | Stages | `request_url`: `GET .../conversations/{conversationId}/communications/{communicationId}/transcripturl` |
 | Saved under | `transacciones/genesys/api` |
 | Next | Download calls the template once per pair -- both ids are already known, so there's no preceding search/listing call to wait on. |

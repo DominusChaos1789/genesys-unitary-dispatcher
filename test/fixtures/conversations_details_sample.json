@@ -23,12 +23,32 @@
                             "direction": "outbound",
                             "dnis": "tel:+570000000002",
                             "mediaType": "voice",
+                            "recording": true,
                             "sessionId": "00000000-0000-4000-8000-000000000021",
                             "segments": [
                                 {
                                     "segmentStart": "2026-08-12T22:01:46.028Z",
                                     "segmentEnd": "2026-08-12T22:01:54.319Z",
                                     "segmentType": "dialing"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "participantId": "00000000-0000-4000-8000-000000000013",
+                    "participantName": "FL_IVR",
+                    "purpose": "ivr",
+                    "sessions": [
+                        {
+                            "direction": "outbound",
+                            "mediaType": "voice",
+                            "sessionId": "00000000-0000-4000-8000-000000000023",
+                            "segments": [
+                                {
+                                    "segmentStart": "2026-08-12T22:01:45.985Z",
+                                    "segmentEnd": "2026-08-12T22:01:46.028Z",
+                                    "segmentType": "ivr"
                                 }
                             ]
                         }
@@ -52,6 +72,7 @@
                         {
                             "direction": "inbound",
                             "mediaType": "voice",
+                            "recording": true,
                             "sessionId": "00000000-0000-4000-8000-000000000022",
                             "segments": [
                                 {
