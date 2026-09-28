@@ -156,6 +156,17 @@ def test_transcripts_is_a_single_url_stage():
     assert stages["request_url"][0] == "transcripts_url"
 
 
+def test_programaciones_is_schedule_ids_then_agent_schedules_then_activity_codes():
+    stages = select_stages(_catalog(), "funcionarios_programaciones")
+
+    assert list(stages) == ["request_schedule_ids", "request_agent_schedules", "request_activity_codes"]
+    assert [name for name, _ in stages.values()] == [
+        "funcionarios_schedules_id",
+        "funcionarios_schedules",
+        "funcionarios_codigo_actividad",
+    ]
+
+
 def test_url_type_endpoints_map_to_the_request_url_stage():
     catalog = {
         "search": {"tag": "t", "type": "unitary", "url": "/s"},

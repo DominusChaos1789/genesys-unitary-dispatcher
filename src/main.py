@@ -7,10 +7,13 @@ the ids come from the event or from an ids source. Every organization that
 gets ids for a tag gets its own flat payload file with a request template for
 every stage of that flow (payload.py):
 
-    surveys                  -> request_context
-    transcripts              -> request_url
-    transcript_events        -> request_url (same endpoint, ids from real-time events)
-    funcionarios_adherencia  -> request_init, request_status (one job per management unit)
+    surveys                     -> request_context
+    transcripts                 -> request_url
+    transcript_events           -> request_url (same endpoint, ids from real-time events)
+    funcionarios_adherencia     -> request_init, request_status (one job per management unit)
+    funcionarios_programaciones -> request_schedule_ids, request_agent_schedules,
+                                    request_activity_codes (one {managementUnitId,
+                                    businessUnitId} pair per management unit)
 
 `"tags": [...]` runs several flows over their own ids, and `"tags": "all"` runs
 every enabled flow whose dispatcher.json id_kind is "conversation", "survey"
@@ -30,12 +33,14 @@ Ids sources:
   Finished surveyIds, (conversationId, communicationId) session pairs, or the
   conversation ids themselves, depending on the tag's id_kind
   (conversations_details.py). Those files are left untouched.
-- "management_unit_list": management unit ids the Genesys management units
-  download left in the landing bucket for the event's `date`, grouped by
-  their org_id= folder, same layout as conversations_details
-  (management_units.py). For funcionarios_adherencia, as an alternative to
-  `ids_location`/an S3 event when the units aren't already grouped by
-  organization in one file.
+- "management_unit_list": ids the Genesys management units download left in
+  the landing bucket for the event's `date`, grouped by their org_id=
+  folder, same layout as conversations_details (management_units.py) --
+  each management unit's own id (funcionarios_adherencia), or
+  {managementUnitId, businessUnitId} pairs (funcionarios_programaciones),
+  depending on the tag's id_kind. For funcionarios_adherencia, as an
+  alternative to `ids_location`/an S3 event when the units aren't already
+  grouped by organization in one file.
 
 Every organization's payload also carries a top-level `date`: the event's
 `date` when the run used one of the two sources above, otherwise today's date
@@ -82,6 +87,7 @@ from src.conversations_details import (
     parse_date,
 )
 from src.dispatcher_config import (
+    MANAGEMENT_UNIT_SCHEDULE_ID_KIND,
     SURVEY_ID_KIND,
     TRANSCRIPT_EVENT_ID_KIND,
     TRANSCRIPT_SESSION_ID_KIND,
@@ -92,7 +98,7 @@ from src.dispatcher_config import (
     output_base_path_key,
 )
 from src.endpoints import load_endpoint_catalog, select_stages
-from src.management_units import collect_management_unit_ids
+from src.management_units import collect_management_unit_business_unit_pairs, collect_management_unit_ids
 from src.payload import build_organization_entry, build_organization_payload, output_base_path
 from src.sources import ALL_TAGS, EventError, resolve_ids_by_organization, resolve_tag_selection
 from src.token_manager import get_token, load_config
@@ -170,7 +176,10 @@ def _resolve_ids(s3_client, settings: Settings, event: dict, execution_id: str, 
         )
     elif ids_source == MANAGEMENT_UNIT_LIST_IDS_SOURCE:
         day = parse_date(event.get("date"), ids_source)
-        outcome = collect_management_unit_ids(s3_client, settings, day)
+        if id_kind == MANAGEMENT_UNIT_SCHEDULE_ID_KIND:
+            outcome = collect_management_unit_business_unit_pairs(s3_client, settings, day)
+        else:
+            outcome = collect_management_unit_ids(s3_client, settings, day)
         ids_by_organization, summary, summary_key = (
             outcome["ids_by_organization"],
             outcome["summary"],

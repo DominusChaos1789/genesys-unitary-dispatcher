@@ -33,6 +33,9 @@ references. An endpoint's `type` decides which stage it fills:
 | `init` | `request_init` | starts an async job, returns a `jobId` |
 | `status` | `request_status` | polled until the job completes |
 | `url` | `request_url` | a call whose ids come from `entry["ids"]` itself rather than a preceding stage (e.g. transcripts: `{conversationId}`/`{communicationId}` are already known from the conversations download) |
+| `schedule_ids` | `request_schedule_ids` | lists a business unit's week schedule ids |
+| `agent_schedules` | `request_agent_schedules` | the full agent schedules for one of those (needs `{scheduleId}`, only known once `request_schedule_ids` responds, so it's left as a placeholder same as `{communicationId}`) |
+| `activity_codes` | `request_activity_codes` | a business unit's activity code catalog |
 
 Current tags:
 
@@ -42,6 +45,7 @@ Current tags:
 | `transcripts` | `request_url` | `transcripts_url` (GET `/speechandtextanalytics/conversations/{conversationId}/communications/{communicationId}/transcripturl`, one call per (conversationId, communicationId) pair — see [Payload](#payload)) |
 | `transcript_events` | `request_url` | `transcript_events_url` (the same call as `transcripts_url`; only its ids source differs — real-time events instead of a daily download) |
 | `funcionarios_adherencia` | `request_init` → `request_status` | `adherence_historical_init` (POST, one bulk job per management unit; no `userIds`, so it covers every user in the unit), `adherence_agent_status` |
+| `funcionarios_programaciones` | `request_schedule_ids` → `request_agent_schedules` → `request_activity_codes` | `funcionarios_schedules_id` (GET, lists a business unit's week schedule ids), `funcionarios_schedules` (POST, the full agent schedules for one of those), `funcionarios_codigo_actividad` (GET, the business unit's activity code catalog — for identifying shift activities later) |
 
 Adding a flow needs two things: tag its endpoints here (no code change, as
 long as it's built from stage types already in the table above), and add it
@@ -66,7 +70,10 @@ deploy:
     "surveys":                 {"enabled": true, "domain": "transacciones", "id_kind": "survey"},
     "transcripts":              {"enabled": true, "domain": "transacciones", "id_kind": "transcript_session"},
     "transcript_events":        {"enabled": true, "domain": "transacciones", "id_kind": "transcript_event"},
-    "funcionarios_adherencia": {"enabled": true, "domain": "funcionarios",  "id_kind": "management_unit"}
+    "funcionarios_adherencia": {"enabled": true, "domain": "funcionarios",  "id_kind": "management_unit"},
+    "funcionarios_programaciones": {
+      "enabled": true, "domain": "funcionarios", "id_kind": "management_unit_schedule"
+    }
   }
 }
 ```
@@ -79,14 +86,15 @@ deploy:
   `id_kind` is `"conversation"`, `"survey"` or `"transcript_session"`. All
   three come from the same conversations_details download, just a different
   part of the same records (see [Ids from the Genesys conversations
-  download](#ids-from-the-genesys-conversations-download)); `"transcript_event"`
-  and adherence's `"management_unit"` keep it out of `"all"` since neither is
-  driven by a `date`. With `ids_source: "conversations_details"`, ids are
-  resolved once per distinct `id_kind` among the tags run — a `"survey"` tag
-  and a `"transcript_session"` tag in the same run never share an ids list,
-  even though both come from that day's files. An organization with ids for
-  one kind but none for another (e.g. no Finished surveys that day) simply gets
-  no file for that tag — it's not a failure.
+  download](#ids-from-the-genesys-conversations-download)); `"transcript_event"`,
+  adherence's `"management_unit"` and `funcionarios_programaciones`'
+  `"management_unit_schedule"` keep those three out of `"all"` since none is
+  driven by a `date` the same way. With `ids_source: "conversations_details"`,
+  ids are resolved once per distinct `id_kind` among the tags run — a
+  `"survey"` tag and a `"transcript_session"` tag in the same run never share
+  an ids list, even though both come from that day's files. An organization
+  with ids for one kind but none for another (e.g. no Finished surveys that
+  day) simply gets no file for that tag — it's not a failure.
 
 This is config, not code: turning a flow on/off, moving it to a different
 domain, or adding a domain's output path is a `dispatcher.json` edit. Adding a
@@ -193,9 +201,17 @@ when the management units aren't already grouped by organization in one
 file. A separate process downloads the management unit list into
 `augusta-nexa-<env>-landing/funcionarios/genesys/api/management_unit_list/org_id=<N>/year=YYYY/month=MM/day=DD/`
 -- the same layout as the conversations download. The run reads that
-`date`'s files for every `org_id=` folder and collects each `endpoint[]`
-record's `id` (`management_units.py`). Files that can't be read, or that
-have no `endpoint` list, are skipped and listed in
+`date`'s files for every `org_id=` folder and collects ids from each
+`endpoint[]` record -- which part depends on the tag's `id_kind`:
+
+- `"management_unit"` (funcionarios_adherencia) -- the record's own `id`.
+- `"management_unit_schedule"` (funcionarios_programaciones) -- one
+  `{managementUnitId, businessUnitId}` pair per record
+  (`id` → `managementUnitId`, `businessUnit.id` → `businessUnitId`); records
+  with no `businessUnit.id` are skipped.
+
+(`management_units.py`). Files that can't be read, or that have no
+`endpoint` list, are skipped and listed in
 `management_unit_list.skipped_files`. `date` is required, as `YYYY-MM-DD`.
 
 An unknown `ids_source` value fails the run before any file is touched.
@@ -274,6 +290,36 @@ no preceding call to fill `{communicationId}` from:
     "url": "/api/v2/speechandtextanalytics/conversations/{conversationId}/communications/{communicationId}/transcripturl",
     "method": "GET",
     "type": "url", "path": "transcripts_url", "result_data": "state"
+  },
+  "failed_organizations": []
+}
+```
+
+`funcionarios_programaciones`' `entry["ids"]` are `{managementUnitId,
+businessUnitId}` pairs, feeding all three of its stages; `{weekId}` and
+`{scheduleId}` aren't in `entry["ids"]` at all -- both stay literal
+placeholders for Download to fill in (`{weekId}` from its own "which week"
+logic, `{scheduleId}` from `request_schedule_ids`' own response):
+
+```json
+{
+  "tag": "funcionarios_programaciones",
+  "date": "2026-09-28",
+  "organization_id": "org-1",
+  "ids": [{"managementUnitId": "db714c5f-...", "businessUnitId": "75cb6459-..."}],
+  "request_schedule_ids": {
+    "url": "/api/v2/workforcemanagement/businessunits/{businessUnitId}/weeks/{weekId}/schedules",
+    "method": "GET", "type": "schedule_ids", "path": "schedules", "result_data": "id"
+  },
+  "request_agent_schedules": {
+    "url": "/api/v2/workforcemanagement/businessunits/{businessUnitId}/weeks/{weekId}/schedules/{scheduleId}/agentschedules/query",
+    "method": "POST",
+    "payload": {"managementUnitId": "{mu_id}"},
+    "type": "agent_schedules", "path": "schedules", "result_data": "state"
+  },
+  "request_activity_codes": {
+    "url": "/api/v2/workforcemanagement/businessunits/{businessUnitId}/activitycodes",
+    "method": "GET", "type": "activity_codes", "path": "activity_codes", "result_data": "id"
   },
   "failed_organizations": []
 }

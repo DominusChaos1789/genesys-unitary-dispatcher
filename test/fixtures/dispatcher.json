@@ -8,6 +8,7 @@
         "surveys": {"enabled": true, "domain": "transacciones", "id_kind": "survey"},
         "transcripts": {"enabled": true, "domain": "transacciones", "id_kind": "transcript_session"},
         "transcript_events": {"enabled": true, "domain": "transacciones", "id_kind": "transcript_event"},
-        "funcionarios_adherencia": {"enabled": true, "domain": "funcionarios", "id_kind": "management_unit"}
+        "funcionarios_adherencia": {"enabled": true, "domain": "funcionarios", "id_kind": "management_unit"},
+        "funcionarios_programaciones": {"enabled": true, "domain": "funcionarios", "id_kind": "management_unit_schedule"}
     }
 }

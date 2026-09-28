@@ -92,3 +92,76 @@ def test_a_day_without_files_produces_an_empty_payload_without_touching_genesys(
     assert result["responses"] == []
     assert result["management_unit_list"]["files_read"] == 0
     assert genesys_api["load_config"] == []
+
+
+def _units_with_business_unit(*pairs) -> dict:
+    """pairs: (management_unit_id, business_unit_id)."""
+    return {
+        "endpoint": [
+            {"id": mu_id, "name": f"MU_{mu_id}", "businessUnit": {"id": bu_id}} for mu_id, bu_id in pairs
+        ],
+        "status": "success",
+    }
+
+
+PROGRAMACIONES_EVENT = {
+    "tag": "funcionarios_programaciones",
+    "ids_source": "management_unit_list",
+    "date": DAY,
+}
+
+
+def test_programaciones_reads_management_unit_business_unit_pairs(aws):
+    s3 = aws["s3"]
+    _put(
+        s3,
+        f"{PREFIX}org_id=1/{DAY_PATH}a.json",
+        _units_with_business_unit(("mu-b", "bu-2"), ("mu-a", "bu-1")),
+    )
+
+    result = run(PROGRAMACIONES_EVENT, _context())
+
+    assert _by_org(result)["org-1"]["ids"] == [
+        {"managementUnitId": "mu-a", "businessUnitId": "bu-1"},
+        {"managementUnitId": "mu-b", "businessUnitId": "bu-2"},
+    ]
+    assert result["management_unit_list"]["management_units"] == {"org-1": 2}
+
+
+def test_programaciones_ignores_units_with_no_business_unit(aws):
+    body = {
+        "endpoint": [
+            {"id": "mu-a", "businessUnit": {"id": "bu-1"}},
+            {"id": "mu-b"},
+            {"id": "mu-c", "businessUnit": {}},
+            {"id": "mu-d", "businessUnit": "not-an-object"},
+            {"businessUnit": {"id": "bu-orphan"}},
+        ]
+    }
+    _put(aws["s3"], f"{PREFIX}org_id=1/{DAY_PATH}mixed.json", body)
+
+    result = run(PROGRAMACIONES_EVENT, _context())
+
+    assert _by_org(result)["org-1"]["ids"] == [{"managementUnitId": "mu-a", "businessUnitId": "bu-1"}]
+
+
+def test_adherence_and_programaciones_never_share_ids_in_the_same_run(aws):
+    _put(
+        aws["s3"],
+        f"{PREFIX}org_id=1/{DAY_PATH}a.json",
+        _units_with_business_unit(("mu-a", "bu-1")),
+    )
+
+    result = run(
+        {
+            "tags": ["funcionarios_adherencia", "funcionarios_programaciones"],
+            "ids_source": "management_unit_list",
+            "date": DAY,
+        },
+        _context(),
+    )
+
+    adherence = payload_by_org(result, "funcionarios_adherencia")["org-1"]
+    programaciones = payload_by_org(result, "funcionarios_programaciones")["org-1"]
+    assert adherence["ids"] == ["mu-a"]
+    assert programaciones["ids"] == [{"managementUnitId": "mu-a", "businessUnitId": "bu-1"}]

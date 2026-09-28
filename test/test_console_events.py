@@ -40,6 +40,8 @@ SUCCEEDS = {
     "15-transcripts-inline.json": {("transcripts", "org-1"): 1},
     "16-transcript-events.json": {("transcript_events", "org-1"): 1},
     "17-adherence-mu-list.json": {("funcionarios_adherencia", "org-1"): 2},
+    "18-programaciones-inline.json": {("funcionarios_programaciones", "org-1"): 1},
+    "19-programaciones-mu-list.json": {("funcionarios_programaciones", "org-1"): 2},
 }
 # event file -> error message the run must fail with
 FAILS = {
@@ -85,7 +87,14 @@ def seeded_landing(aws, seeded_source_files):
     s3.put_object(
         Bucket=LANDING_BUCKET,
         Key=MANAGEMENT_UNIT_LIST_KEY,
-        Body=json.dumps({"endpoint": [{"id": "mu-1", "name": "MU_ONE"}, {"id": "mu-2", "name": "MU_TWO"}]}),
+        Body=json.dumps(
+            {
+                "endpoint": [
+                    {"id": "mu-1", "name": "MU_ONE", "businessUnit": {"id": "bu-1"}},
+                    {"id": "mu-2", "name": "MU_TWO", "businessUnit": {"id": "bu-2"}},
+                ]
+            }
+        ),
     )
     return s3
 

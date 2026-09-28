@@ -49,5 +49,32 @@
         "method": "GET",
         "path": "transcripts_url",
         "result_data": "state"
+    },
+    "funcionarios_schedules_id": {
+        "tag": "funcionarios_programaciones",
+        "url": "/api/v2/workforcemanagement/businessunits/{businessUnitId}/weeks/{weekId}/schedules",
+        "type": "schedule_ids",
+        "method": "GET",
+        "path": "schedules",
+        "result_data": "id"
+    },
+    "funcionarios_schedules": {
+        "tag": "funcionarios_programaciones",
+        "url": "/api/v2/workforcemanagement/businessunits/{businessUnitId}/weeks/{weekId}/schedules/{scheduleId}/agentschedules/query",
+        "type": "agent_schedules",
+        "method": "POST",
+        "path": "schedules",
+        "body_templante": {
+            "managementUnitId": "{mu_id}"
+        },
+        "result_data": "state"
+    },
+    "funcionarios_codigo_actividad": {
+        "tag": "funcionarios_programaciones",
+        "url": "/api/v2/workforcemanagement/businessunits/{businessUnitId}/activitycodes",
+        "type": "activity_codes",
+        "method": "GET",
+        "path": "activity_codes",
+        "result_data": "id"
     }
 }

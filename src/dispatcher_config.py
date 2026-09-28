@@ -16,13 +16,18 @@ kind of id feeds it):
   one event id at a time from the real-time conversation-event process
   instead of a whole day's conversations_details download
   (transcript_events).
-- "management_unit": a wholly different source (funcionarios_adherencia).
+- "management_unit": a management unit's own id (funcionarios_adherencia).
+- "management_unit_schedule": {managementUnitId, businessUnitId} pairs, one
+  per management unit (funcionarios_programaciones) -- its schedule endpoints
+  need both ids, read off the same management units download as
+  "management_unit".
 
 "conversation", "survey" and "transcript_session" all come from the same
 conversations_details download, just a different part of the same records,
 so `"tags": "all"` expands to every enabled flow of any of those three kinds.
-"transcript_event" and "management_unit" flows are never included -- they
-need `tags`/`tag` explicitly, since neither is driven by a `date`.
+"transcript_event", "management_unit" and "management_unit_schedule" flows
+are never included -- they need `tags`/`tag` explicitly, since none of them
+is driven by a `date` the same way.
 
     {
       "version": 1,
@@ -33,7 +38,10 @@ need `tags`/`tag` explicitly, since neither is driven by a `date`.
       "flows": {
         "surveys":     {"enabled": true, "domain": "transacciones", "id_kind": "survey"},
         "transcripts": {"enabled": true, "domain": "transacciones", "id_kind": "transcript_session"},
-        "funcionarios_adherencia": {"enabled": true, "domain": "funcionarios", "id_kind": "management_unit"}
+        "funcionarios_adherencia": {"enabled": true, "domain": "funcionarios", "id_kind": "management_unit"},
+        "funcionarios_programaciones": {
+          "enabled": true, "domain": "funcionarios", "id_kind": "management_unit_schedule"
+        }
       }
     }
 
@@ -57,6 +65,8 @@ CONVERSATION_ID_KIND = "conversation"
 SURVEY_ID_KIND = "survey"
 TRANSCRIPT_SESSION_ID_KIND = "transcript_session"
 TRANSCRIPT_EVENT_ID_KIND = "transcript_event"
+MANAGEMENT_UNIT_ID_KIND = "management_unit"
+MANAGEMENT_UNIT_SCHEDULE_ID_KIND = "management_unit_schedule"
 CONVERSATION_DETAILS_ID_KINDS = (CONVERSATION_ID_KIND, SURVEY_ID_KIND, TRANSCRIPT_SESSION_ID_KIND)
 
 

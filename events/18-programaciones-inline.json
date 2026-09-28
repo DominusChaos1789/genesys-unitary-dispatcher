@@ -1,0 +1,14 @@
+{
+  "tag": "funcionarios_programaciones",
+  "organizations": [
+    {
+      "organization_id": "org-1",
+      "ids": [
+        {
+          "managementUnitId": "db714c5f-cfe3-4966-affb-0e26111c0c8e",
+          "businessUnitId": "75cb6459-89eb-4dbe-b8bf-e7b2cf879b0d"
+        }
+      ]
+    }
+  ]
+}

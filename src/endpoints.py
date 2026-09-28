@@ -5,19 +5,28 @@ core.json maps group names to endpoint-definition files, e.g.
 may carry a `tag`; the endpoints sharing the requested tag are that flow's
 stages, keyed by their `type`:
 
-    unitary -> request_context   the direct call, or the initial listing
-    init    -> request_init      starts an async job and returns a jobId
-    status  -> request_status    polled until the job completes
-    url     -> request_url       a follow-up call needing data the first call
-                                  returned (e.g. transcripts: search finds a
-                                  communicationId, then this fetches its URL)
+    unitary        -> request_context          the direct call, or the initial listing
+    init           -> request_init             starts an async job and returns a jobId
+    status         -> request_status           polled until the job completes
+    url            -> request_url              a follow-up call needing data the first
+                                                call returned (e.g. transcripts: search
+                                                finds a communicationId, then this
+                                                fetches its URL)
+    schedule_ids   -> request_schedule_ids     lists a business unit's week schedule ids
+    agent_schedules -> request_agent_schedules  the full agent schedules for one of those
+    activity_codes -> request_activity_codes   a business unit's activity code catalog
 
 So "surveys" is a single request_context, "funcionarios_adherencia" is
 request_init + request_status (one bulk job per management unit, covering
-every user in it), and "transcripts" is request_context + request_url. A new
-flow is added by tagging its endpoints -- no code change, as long as it's
-built from stage types already listed here; a genuinely new call pattern
-needs a new entry in STAGE_BY_TYPE/STAGE_ORDER.
+every user in it), "transcripts" is request_context + request_url, and
+"funcionarios_programaciones" is request_schedule_ids + request_agent_schedules
++ request_activity_codes (schedule_ids and activity_codes both need only
+{businessUnitId}/{weekId}; agent_schedules also needs {scheduleId}, known
+only once schedule_ids' own response comes back, so it stays a placeholder
+here same as {communicationId} does for transcripts). A new flow is added by
+tagging its endpoints -- no code change, as long as it's built from stage
+types already listed here; a genuinely new call pattern needs a new entry in
+STAGE_BY_TYPE/STAGE_ORDER.
 
 Which tags may run at all, and where each one's output goes, is *not* decided
 here -- see dispatcher_config.py.
@@ -33,8 +42,19 @@ STAGE_BY_TYPE = {
     "init": "request_init",
     "status": "request_status",
     "url": "request_url",
+    "schedule_ids": "request_schedule_ids",
+    "agent_schedules": "request_agent_schedules",
+    "activity_codes": "request_activity_codes",
 }
-STAGE_ORDER = ("request_context", "request_init", "request_status", "request_url")
+STAGE_ORDER = (
+    "request_context",
+    "request_init",
+    "request_status",
+    "request_url",
+    "request_schedule_ids",
+    "request_agent_schedules",
+    "request_activity_codes",
+)
 
 
 def _references(value: Any) -> list[str]:

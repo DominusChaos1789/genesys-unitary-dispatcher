@@ -21,6 +21,11 @@ CONFIG = {
         "surveys": {"enabled": True, "domain": "transacciones", "id_kind": "survey"},
         "transcripts": {"enabled": True, "domain": "transacciones", "id_kind": "transcript_session"},
         "funcionarios_adherencia": {"enabled": True, "domain": "funcionarios", "id_kind": "management_unit"},
+        "funcionarios_programaciones": {
+            "enabled": True,
+            "domain": "funcionarios",
+            "id_kind": "management_unit_schedule",
+        },
         "retired_flow": {"enabled": False, "domain": "transacciones", "id_kind": "conversation"},
     },
 }
@@ -78,4 +83,6 @@ def test_output_base_path_key_follows_the_flows_domain():
 def test_conversation_tags_are_every_enabled_conversations_details_flow():
     # retired_flow is id_kind "conversation" but disabled, so it's excluded.
     # surveys ("survey") and transcripts ("transcript_session") both count too.
+    # funcionarios_adherencia ("management_unit") and funcionarios_programaciones
+    # ("management_unit_schedule") are excluded: neither is date-driven.
     assert conversation_tags(CONFIG) == ["surveys", "transcripts"]
