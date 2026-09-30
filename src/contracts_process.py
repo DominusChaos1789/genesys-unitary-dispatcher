@@ -108,8 +108,10 @@ def process_contract(s3_client, settings: Settings, contract_key: str, execution
     # Last step, so a failure anywhere above leaves the source files in place
     # to re-run. Only files that were read are deleted; unreadable ones stay
     # for investigation.
-    deleted_keys = s3_utils.delete_objects(s3_client, source_bucket, successful_keys)
-    logger.info("[%s] Deleted %d source object(s)", contract_key, len(deleted_keys))
+    # TEMPORARY: deletion disabled -- re-enable by uncommenting below.
+    # deleted_keys = s3_utils.delete_objects(s3_client, source_bucket, successful_keys)
+    # logger.info("[%s] Deleted %d source object(s)", contract_key, len(deleted_keys))
+    deleted_keys: list[str] = []
 
     return {
         "contract_key": contract_key,
