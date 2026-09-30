@@ -53,7 +53,7 @@
     "funcionarios_schedules_id": {
         "tag": "funcionarios_programaciones",
         "url": "/api/v2/workforcemanagement/businessunits/{businessUnitId}/weeks/{weekId}/schedules",
-        "type": "schedule_ids",
+        "type": "unitary",
         "method": "GET",
         "path": "schedules",
         "result_data": "id"
@@ -61,7 +61,7 @@
     "funcionarios_schedules": {
         "tag": "funcionarios_programaciones",
         "url": "/api/v2/workforcemanagement/businessunits/{businessUnitId}/weeks/{weekId}/schedules/{scheduleId}/agentschedules/query",
-        "type": "agent_schedules",
+        "type": "unitary",
         "method": "POST",
         "path": "schedules",
         "body_templante": {
@@ -72,7 +72,7 @@
     "funcionarios_codigo_actividad": {
         "tag": "funcionarios_programaciones",
         "url": "/api/v2/workforcemanagement/businessunits/{businessUnitId}/activitycodes",
-        "type": "activity_codes",
+        "type": "unitary",
         "method": "GET",
         "path": "activity_codes",
         "result_data": "id"

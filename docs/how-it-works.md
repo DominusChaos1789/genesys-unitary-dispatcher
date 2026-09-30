@@ -126,9 +126,18 @@ and stages always come out in this order:
 | `init` | `request_init` | starts an asynchronous job, returns a `jobId` |
 | `status` | `request_status` | polled until the job completes |
 | `url` | `request_url` | a call whose ids come straight from `entry["ids"]`, not a preceding stage (transcripts: `{conversationId}`/`{communicationId}` are already known from the conversations download) |
-| `schedule_ids` | `request_schedule_ids` | lists a business unit's week schedule ids |
-| `agent_schedules` | `request_agent_schedules` | the full agent schedules for one of those |
-| `activity_codes` | `request_activity_codes` | a business unit's activity code catalog |
+
+`funcionarios_programaciones` is the exception: its three endpoints are all
+`"type": "unitary"` too (same as every other flow's direct calls), so `type`
+alone can't tell them apart under one tag. `endpoints.STAGE_BY_NAME` keys
+them by their literal endpoint name instead, checked before the `type` table
+above:
+
+| endpoint name | Stage | Meaning |
+|---|---|---|
+| `funcionarios_schedules_id` | `request_schedule_ids` | lists a business unit's week schedule ids |
+| `funcionarios_schedules` | `request_agent_schedules` | the full agent schedules for one of those |
+| `funcionarios_codigo_actividad` | `request_activity_codes` | a business unit's activity code catalog |
 
 A flow needs at least one stage and at most one endpoint per stage. Endpoints
 without a `tag` belong to no flow. But being tagged isn't enough to *run*: the

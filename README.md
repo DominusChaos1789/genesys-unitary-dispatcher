@@ -33,9 +33,18 @@ references. An endpoint's `type` decides which stage it fills:
 | `init` | `request_init` | starts an async job, returns a `jobId` |
 | `status` | `request_status` | polled until the job completes |
 | `url` | `request_url` | a call whose ids come from `entry["ids"]` itself rather than a preceding stage (e.g. transcripts: `{conversationId}`/`{communicationId}` are already known from the conversations download) |
-| `schedule_ids` | `request_schedule_ids` | lists a business unit's week schedule ids |
-| `agent_schedules` | `request_agent_schedules` | the full agent schedules for one of those (needs `{scheduleId}`, only known once `request_schedule_ids` responds, so it's left as a placeholder same as `{communicationId}`) |
-| `activity_codes` | `request_activity_codes` | a business unit's activity code catalog |
+
+`funcionarios_programaciones` is the exception: its three endpoints are all
+`"type": "unitary"` too, same as every other flow's direct calls, so `type`
+can't tell them apart under one tag. They're keyed by their literal endpoint
+*name* instead (`endpoints.STAGE_BY_NAME`, checked before the `type` table
+above):
+
+| endpoint name | stage | meaning |
+|---|---|---|
+| `funcionarios_schedules_id` | `request_schedule_ids` | lists a business unit's week schedule ids |
+| `funcionarios_schedules` | `request_agent_schedules` | the full agent schedules for one of those (needs `{scheduleId}`, only known once `request_schedule_ids` responds, so it's left as a placeholder same as `{communicationId}`) |
+| `funcionarios_codigo_actividad` | `request_activity_codes` | a business unit's activity code catalog |
 
 Current tags:
 
@@ -309,17 +318,17 @@ logic, `{scheduleId}` from `request_schedule_ids`' own response):
   "ids": [{"managementUnitId": "db714c5f-...", "businessUnitId": "75cb6459-..."}],
   "request_schedule_ids": {
     "url": "/api/v2/workforcemanagement/businessunits/{businessUnitId}/weeks/{weekId}/schedules",
-    "method": "GET", "type": "schedule_ids", "path": "schedules", "result_data": "id"
+    "method": "GET", "type": "unitary", "path": "schedules", "result_data": "id"
   },
   "request_agent_schedules": {
     "url": "/api/v2/workforcemanagement/businessunits/{businessUnitId}/weeks/{weekId}/schedules/{scheduleId}/agentschedules/query",
     "method": "POST",
     "payload": {"managementUnitId": "{mu_id}"},
-    "type": "agent_schedules", "path": "schedules", "result_data": "state"
+    "type": "unitary", "path": "schedules", "result_data": "state"
   },
   "request_activity_codes": {
     "url": "/api/v2/workforcemanagement/businessunits/{businessUnitId}/activitycodes",
-    "method": "GET", "type": "activity_codes", "path": "activity_codes", "result_data": "id"
+    "method": "GET", "type": "unitary", "path": "activity_codes", "result_data": "id"
   },
   "failed_organizations": []
 }
