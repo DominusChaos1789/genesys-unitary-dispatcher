@@ -140,13 +140,16 @@ def get_token(
 ) -> dict:
     """A usable OAuth token for `server`'s organization, reusing the cached
     one from DynamoDB unless it is close to expiring."""
-    now = now or datetime.now(UTC)
-    dataset = f"{base_path}/{server.get('relative_path', '')}"
-
-    cached = _cached_token(get_last_execution_dynamo(resource_name, dataset), now)
-    if cached:
-        return cached
-
-    token = _mint_token(secret, connection, server)
-    write_log_token(token, dataset)
-    return token
+    # TEMPORARY: token retrieval disabled -- "{token}" is a literal
+    # placeholder, not a real access token. Re-enable by uncommenting below.
+    return {"access_token": "{token}"}
+    # now = now or datetime.now(UTC)
+    # dataset = f"{base_path}/{server.get('relative_path', '')}"
+    #
+    # cached = _cached_token(get_last_execution_dynamo(resource_name, dataset), now)
+    # if cached:
+    #     return cached
+    #
+    # token = _mint_token(secret, connection, server)
+    # write_log_token(token, dataset)
+    # return token
