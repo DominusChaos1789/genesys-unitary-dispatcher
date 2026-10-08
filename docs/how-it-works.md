@@ -135,9 +135,9 @@ above:
 
 | endpoint name | Stage | Meaning |
 |---|---|---|
-| `funcionarios_schedules_id` | `request_schedule_ids` | lists a business unit's week schedule ids |
-| `funcionarios_schedules` | `request_agent_schedules` | the full agent schedules for one of those |
-| `funcionarios_codigo_actividad` | `request_activity_codes` | a business unit's activity code catalog |
+| `funcionarios_schedules_id` | `request_context` | lists a business unit's week schedule ids |
+| `funcionarios_schedules` | `request_status` | the full agent schedules for one of those |
+| `funcionarios_codigo_actividad` | `request_activity` | a business unit's activity code catalog |
 
 A flow needs at least one stage and at most one endpoint per stage. Endpoints
 without a `tag` belong to no flow. But being tagged isn't enough to *run*: the
@@ -322,9 +322,9 @@ flowchart LR
 | | |
 |---|---|
 | Ids | `{managementUnitId, businessUnitId}` pairs (`id_kind: "management_unit_schedule"`) -- one per management unit, read off the same management units download `funcionarios_adherencia` reads, just its `businessUnit.id` too |
-| Stages | `request_schedule_ids`: `GET .../businessunits/{businessUnitId}/weeks/{weekId}/schedules` → `request_agent_schedules`: `POST .../weeks/{weekId}/schedules/{scheduleId}/agentschedules/query` → `request_activity_codes`: `GET .../businessunits/{businessUnitId}/activitycodes` |
+| Stages | `request_context`: `GET .../businessunits/{businessUnitId}/weeks/{weekId}/schedules` → `request_status`: `POST .../weeks/{weekId}/schedules/{scheduleId}/agentschedules/query` → `request_activity`: `GET .../businessunits/{businessUnitId}/activitycodes` |
 | Saved under | `funcionarios/genesys/api` |
-| Next | Download calls `request_schedule_ids` per pair (`{businessUnitId}` from `entry["ids"]`, `{weekId}` its own "which week" -- format `YYYY-MM-DD`), reads a schedule id out of the response, fills `{scheduleId}` into `request_agent_schedules` (`{mu_id}` in its body comes from the same pair's `managementUnitId`), and separately calls `request_activity_codes` per business unit to build the activity-code catalog `request_agent_schedules`' results get labeled against. |
+| Next | Download calls `request_context` per pair (`{businessUnitId}` from `entry["ids"]`, `{weekId}` its own "which week" -- format `YYYY-MM-DD`), reads a schedule id out of the response, fills `{scheduleId}` into `request_status` (`{mu_id}` in its body comes from the same pair's `managementUnitId`), and separately calls `request_activity` per business unit to build the activity-code catalog `request_status`' results get labeled against. |
 
 Not part of `"tags": "all"` -- see [dispatcher.json](#3-how-a-flow-is-defined).
 

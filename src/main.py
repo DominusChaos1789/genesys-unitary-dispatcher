@@ -11,8 +11,8 @@ every stage of that flow (payload.py):
     transcripts                 -> request_url
     transcript_events           -> request_url (same endpoint, ids from real-time events)
     funcionarios_adherencia     -> request_init, request_status (one job per management unit)
-    funcionarios_programaciones -> request_schedule_ids, request_agent_schedules,
-                                    request_activity_codes (one {managementUnitId,
+    funcionarios_programaciones -> request_context, request_status,
+                                    request_activity (one {managementUnitId,
                                     businessUnitId} pair per management unit)
 
 `"tags": [...]` runs several flows over their own ids, and `"tags": "all"` runs

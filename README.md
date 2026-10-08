@@ -42,9 +42,9 @@ above):
 
 | endpoint name | stage | meaning |
 |---|---|---|
-| `funcionarios_schedules_id` | `request_schedule_ids` | lists a business unit's week schedule ids |
-| `funcionarios_schedules` | `request_agent_schedules` | the full agent schedules for one of those (needs `{scheduleId}`, only known once `request_schedule_ids` responds, so it's left as a placeholder same as `{communicationId}`) |
-| `funcionarios_codigo_actividad` | `request_activity_codes` | a business unit's activity code catalog |
+| `funcionarios_schedules_id` | `request_context` | lists a business unit's week schedule ids |
+| `funcionarios_schedules` | `request_status` | the full agent schedules for one of those (needs `{scheduleId}`, only known once `request_context` responds, so it's left as a placeholder same as `{communicationId}`) |
+| `funcionarios_codigo_actividad` | `request_activity` | a business unit's activity code catalog |
 
 Current tags:
 
@@ -54,7 +54,7 @@ Current tags:
 | `transcripts` | `request_url` | `transcripts_url` (GET `/speechandtextanalytics/conversations/{conversationId}/communications/{communicationId}/transcripturl`, one call per (conversationId, communicationId) pair — see [Payload](#payload)) |
 | `transcript_events` | `request_url` | `transcript_events_url` (the same call as `transcripts_url`; only its ids source differs — real-time events instead of a daily download) |
 | `funcionarios_adherencia` | `request_init` → `request_status` | `adherence_historical_init` (POST, one bulk job per management unit; no `userIds`, so it covers every user in the unit), `adherence_agent_status` |
-| `funcionarios_programaciones` | `request_schedule_ids` → `request_agent_schedules` → `request_activity_codes` | `funcionarios_schedules_id` (GET, lists a business unit's week schedule ids), `funcionarios_schedules` (POST, the full agent schedules for one of those), `funcionarios_codigo_actividad` (GET, the business unit's activity code catalog — for identifying shift activities later) |
+| `funcionarios_programaciones` | `request_context` → `request_status` → `request_activity` | `funcionarios_schedules_id` (GET, lists a business unit's week schedule ids), `funcionarios_schedules` (POST, the full agent schedules for one of those), `funcionarios_codigo_actividad` (GET, the business unit's activity code catalog — for identifying shift activities later) |
 
 Adding a flow needs two things: tag its endpoints here (no code change, as
 long as it's built from stage types already in the table above), and add it
@@ -308,7 +308,7 @@ no preceding call to fill `{communicationId}` from:
 businessUnitId}` pairs, feeding all three of its stages; `{weekId}` and
 `{scheduleId}` aren't in `entry["ids"]` at all -- both stay literal
 placeholders for Download to fill in (`{weekId}` from its own "which week"
-logic, `{scheduleId}` from `request_schedule_ids`' own response):
+logic, `{scheduleId}` from `request_context`' own response):
 
 ```json
 {
@@ -316,17 +316,17 @@ logic, `{scheduleId}` from `request_schedule_ids`' own response):
   "date": "2026-09-28",
   "organization_id": "org-1",
   "ids": [{"managementUnitId": "db714c5f-...", "businessUnitId": "75cb6459-..."}],
-  "request_schedule_ids": {
+  "request_context": {
     "url": "/api/v2/workforcemanagement/businessunits/{businessUnitId}/weeks/{weekId}/schedules",
     "method": "GET", "type": "unitary", "path": "schedules", "result_data": "id"
   },
-  "request_agent_schedules": {
+  "request_status": {
     "url": "/api/v2/workforcemanagement/businessunits/{businessUnitId}/weeks/{weekId}/schedules/{scheduleId}/agentschedules/query",
     "method": "POST",
     "payload": {"managementUnitId": "{mu_id}"},
     "type": "unitary", "path": "schedules", "result_data": "state"
   },
-  "request_activity_codes": {
+  "request_activity": {
     "url": "/api/v2/workforcemanagement/businessunits/{businessUnitId}/activitycodes",
     "method": "GET", "type": "unitary", "path": "activity_codes", "result_data": "id"
   },

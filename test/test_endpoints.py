@@ -159,7 +159,7 @@ def test_transcripts_is_a_single_url_stage():
 def test_programaciones_is_schedule_ids_then_agent_schedules_then_activity_codes():
     stages = select_stages(_catalog(), "funcionarios_programaciones")
 
-    assert list(stages) == ["request_schedule_ids", "request_agent_schedules", "request_activity_codes"]
+    assert list(stages) == ["request_context", "request_status", "request_activity"]
     assert [name for name, _ in stages.values()] == [
         "funcionarios_schedules_id",
         "funcionarios_schedules",

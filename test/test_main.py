@@ -200,14 +200,14 @@ def test_programaciones_is_schedule_ids_then_agent_schedules_then_activity_codes
     )
 
     assert responses_for(result)[0]["stages"] == [
-        "request_schedule_ids",
-        "request_agent_schedules",
-        "request_activity_codes",
+        "request_context",
+        "request_status",
+        "request_activity",
     ]
     entry = read_payload(result)
     assert entry["ids"] == [pair]
 
-    schedule_ids = entry["request_schedule_ids"]
+    schedule_ids = entry["request_context"]
     assert (
         schedule_ids["url"]
         == "/api/v2/workforcemanagement/businessunits/{businessUnitId}/weeks/{weekId}/schedules"
@@ -215,18 +215,18 @@ def test_programaciones_is_schedule_ids_then_agent_schedules_then_activity_codes
     assert schedule_ids["method"] == "GET"
     assert schedule_ids["result_data"] == "id"
 
-    agent_schedules = entry["request_agent_schedules"]
+    agent_schedules = entry["request_status"]
     assert agent_schedules["url"] == (
         "/api/v2/workforcemanagement/businessunits/{businessUnitId}/weeks/{weekId}"
         "/schedules/{scheduleId}/agentschedules/query"
     )
     assert agent_schedules["method"] == "POST"
     # {businessUnitId}/{weekId} come from entry["ids"]/the caller per call; {scheduleId}
-    # only comes back from request_schedule_ids' own response, so it's left as a
+    # only comes back from request_context's own response, so it's left as a
     # placeholder -- same idea as transcripts' {communicationId}.
     assert agent_schedules["payload"] == {"managementUnitId": "{mu_id}"}
 
-    activity_codes = entry["request_activity_codes"]
+    activity_codes = entry["request_activity"]
     assert activity_codes["url"] == "/api/v2/workforcemanagement/businessunits/{businessUnitId}/activitycodes"
     assert activity_codes["method"] == "GET"
 

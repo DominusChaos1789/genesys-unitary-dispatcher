@@ -42,7 +42,7 @@ otherwise the day the run happened.
 | `15-transcripts-inline` | transcripts for one `{conversationId, communicationId}` pair sent in the event | token + payload | list of 1: `stages: ["request_url"]` |
 | `16-transcript-events` | transcript_events for one real-time event id sent in the event | reads that event's file under `.../genesys/events/` (never deletes it) | list of 1: `stages: ["request_url"]` |
 | `17-adherence-mu-list` | adherence for every management unit downloaded on 2026-08-13 | reads the landing files (never deletes them) | list with one entry per `org_id=` folder with files that day |
-| `18-programaciones-inline` | funcionarios_programaciones for one `{managementUnitId, businessUnitId}` pair sent in the event | token + payload | list of 1: `stages: ["request_schedule_ids", "request_agent_schedules", "request_activity_codes"]` |
+| `18-programaciones-inline` | funcionarios_programaciones for one `{managementUnitId, businessUnitId}` pair sent in the event | token + payload | list of 1: `stages: ["request_context", "request_status", "request_activity"]` |
 | `19-programaciones-mu-list` | funcionarios_programaciones for every management unit downloaded on 2026-08-13 | reads the landing files (never deletes them) | same shape as `17`, one flow (`funcionarios_programaciones`) |
 | `06-surveys-contracts` | the hourly contracts process, then surveys | ⚠️ **writes parquet to refined and deletes the processed transcription files in providers-landing** | list with one entry per contract's organization; contract counts are in the `Run summary` log line |
 

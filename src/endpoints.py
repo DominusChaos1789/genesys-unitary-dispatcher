@@ -21,14 +21,15 @@ needs a new entry in STAGE_BY_TYPE/STAGE_ORDER.
 
 funcionarios_programaciones is the exception: its three endpoints
 (funcionarios_schedules_id, funcionarios_schedules,
-funcionarios_codigo_actividad -- request_schedule_ids, request_agent_schedules,
-request_activity_codes) are all `"type": "unitary"` in the real unitary.json,
-same as every other flow's direct calls, so `type` can't tell them apart
-under one tag. They're keyed by their literal endpoint name instead, in
-STAGE_BY_NAME, checked before STAGE_BY_TYPE. schedule_ids and activity_codes
-both need only {businessUnitId}/{weekId}; agent_schedules also needs
-{scheduleId}, known only once schedule_ids' own response comes back, so it
-stays a placeholder here same as {communicationId} does for transcripts.
+funcionarios_codigo_actividad -- request_context, request_status,
+request_activity) are all `"type": "unitary"` in the real unitary.json, same
+as every other flow's direct calls, so `type` can't tell them apart under one
+tag. They're keyed by their literal endpoint name instead, in STAGE_BY_NAME,
+checked before STAGE_BY_TYPE. funcionarios_schedules_id (request_context) and
+funcionarios_codigo_actividad (request_activity) both need only
+{businessUnitId}/{weekId}; funcionarios_schedules (request_status) also needs
+{scheduleId}, known only once request_context's own response comes back, so
+it stays a placeholder here same as {communicationId} does for transcripts.
 
 Which tags may run at all, and where each one's output goes, is *not* decided
 here -- see dispatcher_config.py.
@@ -50,17 +51,15 @@ STAGE_ORDER = (
     "request_init",
     "request_status",
     "request_url",
-    "request_schedule_ids",
-    "request_agent_schedules",
-    "request_activity_codes",
+    "request_activity",
 )
 # Endpoints that share both a tag and a `type` with a sibling (so `type` can't
 # tell them apart) are keyed by their literal name instead. Checked before
 # STAGE_BY_TYPE.
 STAGE_BY_NAME = {
-    "funcionarios_schedules_id": "request_schedule_ids",
-    "funcionarios_schedules": "request_agent_schedules",
-    "funcionarios_codigo_actividad": "request_activity_codes",
+    "funcionarios_schedules_id": "request_context",
+    "funcionarios_schedules": "request_status",
+    "funcionarios_codigo_actividad": "request_activity",
 }
 
 
