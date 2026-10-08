@@ -5,7 +5,7 @@ An external process writes each Genesys Cloud conversation event (its
 folder per organization, no date partitioning -- events arrive continuously
 rather than once a day:
 
-    augusta-nexa-<env>-landing/transacciones/genesys/events/org_id=<N>/<event_id>.json
+    augusta-nexa-<env>-landing/transacciones/genesys/real_time_tmp_events/transcript_events/org_id=<N>/<event_id>.json
 
 Each file is the EventBridge event Genesys Cloud emits, shaped roughly like
 {"detail": {"eventBody": {"conversationId": ..., "sessionId": ..., ...}}}.
@@ -41,10 +41,12 @@ def _event_key(prefix: str, organization_id: str, event_id: str) -> str:
 def _conversation_session_pair(document) -> dict | None:
     event_body = ((document or {}).get("detail") or {}).get("eventBody") or {}
     conversation_id = event_body.get("conversationId")
-    session_id = event_body.get("sessionId")
-    if not conversation_id or not session_id:
+    # The communication id is the event's sessionId; accept an explicit
+    # communicationId too, should the file already carry one.
+    communication_id = event_body.get("communicationId") or event_body.get("sessionId")
+    if not conversation_id or not communication_id:
         return None
-    return {"conversationId": conversation_id, "communicationId": session_id}
+    return {"conversationId": conversation_id, "communicationId": communication_id}
 
 
 def resolve_transcript_events(s3_client, settings: Settings, event_ids_by_organization: dict) -> dict:

@@ -40,7 +40,7 @@ otherwise the day the run happened.
 | `08-adherence-s3-file` | adherence for the units listed in an S3 file | reads the file | same as 07 |
 | `09-eventbridge-s3` | the S3 "Object Created" event EventBridge would send for that file | reads the file | same as 07 |
 | `15-transcripts-inline` | transcripts for one `{conversationId, communicationId}` pair sent in the event | token + payload | list of 1: `stages: ["request_url"]` |
-| `16-transcript-events` | transcript_events for one real-time event id sent in the event | reads that event's file under `.../genesys/events/` (never deletes it) | list of 1: `stages: ["request_url"]` |
+| `16-transcript-events` | transcript_events for one real-time event id sent in the event | reads that event's file under `.../genesys/real_time_tmp_events/transcript_events/` (never deletes it) | list of 1: `stages: ["request_url"]` |
 | `17-adherence-mu-list` | adherence for every management unit downloaded on 2026-08-13 | reads the landing files (never deletes them) | list with one entry per `org_id=` folder with files that day |
 | `18-programaciones-inline` | funcionarios_programaciones for one `{managementUnitId, businessUnitId}` pair sent in the event | token + payload | list of 1: `stages: ["request_context", "request_status", "request_activity"]` |
 | `19-programaciones-mu-list` | funcionarios_programaciones for every management unit downloaded on 2026-08-13 | reads the landing files (never deletes them) | same shape as `17`, one flow (`funcionarios_programaciones`) |
@@ -75,7 +75,7 @@ the `Run summary` log line for the per-organization counts.
   on the payload.
 - **`16`**: its event id (`00000000-0000-4000-8000-000000000003`) has to name
   a file that actually exists at
-  `augusta-nexa-dev-landing/transacciones/genesys/events/org_id=1/<event_id>.json`,
+  `augusta-nexa-dev-landing/transacciones/genesys/real_time_tmp_events/transcript_events/org_id=1/<event_id>.json`,
   shaped like `{"detail": {"eventBody": {"conversationId": "...", "sessionId": "...", ...}}}`
   -- upload one first if running this from the console.
 - **`08`, `09`**: upload the units file first (edit its id too). The key is an

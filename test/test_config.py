@@ -152,7 +152,10 @@ def test_conversations_events_defaults_follow_the_environment(monkeypatch):
     settings = load_settings()
 
     assert settings.conversations_events_bucket == "augusta-nexa-stg-landing"
-    assert settings.conversations_events_prefix == "transacciones/genesys/events/"
+    assert (
+        settings.conversations_events_prefix
+        == "transacciones/genesys/real_time_tmp_events/transcript_events/"
+    )
 
 
 def test_conversations_events_overrides(monkeypatch):

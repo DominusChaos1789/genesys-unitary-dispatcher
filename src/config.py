@@ -26,7 +26,7 @@ DEFAULT_CONVERSATIONS_DETAILS_PREFIX = "transacciones/genesys/api/conversations_
 # Where the real-time conversation-event process leaves its files, one per
 # event: <prefix>org_id=<N>/<event_id>.json -- no date partitioning, since
 # events arrive continuously rather than once a day.
-DEFAULT_CONVERSATIONS_EVENTS_PREFIX = "transacciones/genesys/events/"
+DEFAULT_CONVERSATIONS_EVENTS_PREFIX = "transacciones/genesys/real_time_tmp_events/transcript_events/"
 # Where the Genesys management units download leaves its files, same layout
 # as the conversations download: <prefix>org_id=<N>/year=YYYY/month=MM/day=DD/*.json
 DEFAULT_MANAGEMENT_UNIT_LIST_PREFIX = "funcionarios/genesys/api/management_unit_list/"

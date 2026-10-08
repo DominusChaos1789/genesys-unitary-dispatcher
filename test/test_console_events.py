@@ -19,7 +19,10 @@ CONVERSATIONS_DETAILS_KEY = (
     "conversations_details_2026-08-13_00:00:00_1.json"
 )
 MANAGEMENT_UNITS_KEY = "funcionarios/genesys/api/management_units/2026-08-13.json"
-TRANSCRIPT_EVENT_KEY = "transacciones/genesys/events/org_id=1/00000000-0000-4000-8000-000000000003.json"
+TRANSCRIPT_EVENT_KEY = (
+    "transacciones/genesys/real_time_tmp_events/transcript_events/"
+    "org_id=1/00000000-0000-4000-8000-000000000003.json"
+)
 MANAGEMENT_UNIT_LIST_KEY = (
     "funcionarios/genesys/api/management_unit_list/org_id=1/year=2026/month=08/day=13/units.json"
 )

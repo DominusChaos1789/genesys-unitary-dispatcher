@@ -257,7 +257,7 @@ continuously):
 
 ```mermaid
 flowchart LR
-    E["landing/.../events/<br/>org_id=N/&lt;event_id&gt;.json"] --> R["read the given event ids'<br/>files one at a time"]
+    E["landing/.../real_time_tmp_events/transcript_events/<br/>org_id=N/&lt;event_id&gt;.json"] --> R["read the given event ids'<br/>files one at a time"]
     R --> X["extract detail.eventBody.<br/>conversationId + sessionId"]
     X --> P["{conversationId,<br/>communicationId} pairs"]
 ```

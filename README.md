@@ -236,7 +236,7 @@ An unknown `ids_source` value fails the run before any file is touched.
 above — its ids aren't read from a whole day's conversations_details
 download at all. A separate real-time process writes each Genesys Cloud
 conversation event into
-`augusta-nexa-<env>-landing/transacciones/genesys/events/org_id=<N>/<event_id>.json`
+`augusta-nexa-<env>-landing/transacciones/genesys/real_time_tmp_events/transcript_events/org_id=<N>/<event_id>.json`
 as it happens (no date partitioning), and an SQS-fed Step Function hands this
 Lambda the event ids to read for each organization, the same way any other
 tag's ids are supplied. For each one, the run reads that file — shaped like
@@ -472,7 +472,7 @@ All optional.
 | `CONVERSATIONS_DETAILS_BUCKET` | `augusta-nexa-<env>-landing` | Conversations-download source: the bucket it writes to. Logical or full name. |
 | `CONVERSATIONS_DETAILS_PREFIX` | `transacciones/genesys/api/conversations_details/` | The folder holding the `org_id=<N>/year=/month=/day=` partitions. |
 | `CONVERSATIONS_EVENTS_BUCKET` | `augusta-nexa-<env>-landing` | `transcript_events` source: the bucket the real-time event process writes to. Logical or full name. |
-| `CONVERSATIONS_EVENTS_PREFIX` | `transacciones/genesys/events/` | The folder holding the `org_id=<N>/<event_id>.json` files (no date partitioning). |
+| `CONVERSATIONS_EVENTS_PREFIX` | `transacciones/genesys/real_time_tmp_events/transcript_events/` | The folder holding the `org_id=<N>/<event_id>.json` files (no date partitioning). |
 | `MANAGEMENT_UNIT_LIST_BUCKET` | `augusta-nexa-<env>-landing` | `management_unit_list` source: the bucket the Genesys management units download writes to. Logical or full name. |
 | `MANAGEMENT_UNIT_LIST_PREFIX` | `funcionarios/genesys/api/management_unit_list/` | The folder holding the `org_id=<N>/year=/month=/day=` partitions. |
 

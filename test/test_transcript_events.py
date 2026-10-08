@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from src.main import run
 from test.conftest import LANDING_BUCKET, payload_by_org
 
-PREFIX = "transacciones/genesys/events/"
+PREFIX = "transacciones/genesys/real_time_tmp_events/transcript_events/"
 
 
 def _context(request_id: str = "req-events"):
@@ -89,3 +89,19 @@ def test_transcript_events_is_not_part_of_tags_all(aws):
 
     tags_present = {r["tag"] for r in result["responses"]}
     assert "transcript_events" not in tags_present
+
+
+def test_an_explicit_communication_id_wins_over_the_session_id(aws):
+    key = f"{PREFIX}org_id=1/evt-1.json"
+    body = {
+        "detail": {
+            "eventBody": {"conversationId": "conv-1", "communicationId": "comm-1", "sessionId": "sess-1"}
+        }
+    }
+    aws["s3"].put_object(Bucket=LANDING_BUCKET, Key=key, Body=json.dumps(body))
+
+    result = run(_event("org-1", "evt-1"), _context())
+
+    assert payload_by_org(result)["org-1"]["ids"] == [
+        {"conversationId": "conv-1", "communicationId": "comm-1"}
+    ]
