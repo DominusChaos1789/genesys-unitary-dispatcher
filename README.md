@@ -51,7 +51,7 @@ Current tags:
 | tag | stages | endpoints |
 |---|---|---|
 | `surveys` | `request_context` | `conversations_surveys_result` (GET `/quality/surveys/{surveyId}`, one call per Finished surveyId, no polling) |
-| `transcripts` | `request_url` | `transcripts_url` (GET `/speechandtextanalytics/conversations/{conversationId}/communications/{communicationId}/transcripturl`, one call per (conversationId, communicationId) pair — see [Payload](#payload)) |
+| `transcripts` | `request_context` → `request_url` | `conversations_participants` (GET `/conversations/{conversationId}`, the conversation itself, sent along with each transcript download), `transcripts_url` (GET `/speechandtextanalytics/conversations/{conversationId}/communications/{communicationId}/transcripturl`, one call per (conversationId, communicationId) pair — see [Payload](#payload)) |
 | `transcript_events` | `request_url` | `transcript_events_url` (the same call as `transcripts_url`; only its ids source differs — real-time events instead of a daily download) |
 | `funcionarios_adherencia` | `request_init` → `request_status` | `adherence_historical_init` (POST, one bulk job per management unit; no `userIds`, so it covers every user in the unit), `adherence_agent_status` |
 | `funcionarios_programaciones` | `request_context` → `request_status` → `request_activity` | `funcionarios_schedules_id` (GET, lists a business unit's week schedule ids), `funcionarios_schedules` (POST, the full agent schedules for one of those), `funcionarios_codigo_actividad` (GET, the business unit's activity code catalog — for identifying shift activities later) |
@@ -224,6 +224,32 @@ file. A separate process downloads the management unit list into
 `management_unit_list.skipped_files`. `date` is required, as `YYYY-MM-DD`.
 
 An unknown `ids_source` value fails the run before any file is touched.
+
+### Ids for specific conversations (`unitary_conversations`)
+
+```json
+{"tag": "surveys", "ids_source": "unitary_conversations",
+ "ids_location": {"bucket": "landing", "key": "transacciones/genesys/unitary_process/<file>.json"}}
+```
+
+(or the S3 "Object Created" event for that file, as with `ids_location`). The
+unitary process drops a file under
+`augusta-nexa-<env>-landing/transacciones/genesys/unitary_process/`:
+
+```json
+{"tag": "surveys", "date": "2026-10-14", "organization_id": "org-3",
+ "ids": ["<conversationId>", "..."]}
+```
+
+(or a list of those). Its `ids` are **conversation ids**: the run looks them up
+in that organization's `conversations_details/org_id=<N>/year=/month=/day=/`
+folder for `date` and turns them into whatever the tag's `id_kind` needs —
+Finished surveyIds for `surveys`, `{conversationId, communicationId}` pairs for
+`transcripts` — so only those conversations are processed, not the whole day.
+Several entries for one organization are merged. It works for the id_kinds
+conversations_details can feed (`conversation`, `survey`, `transcript_session`);
+any other tag is rejected. The file's own `tag` isn't used — the event's is.
+Conversations not found in the folder simply produce no ids.
 
 ### Ids from real-time conversation events (`transcript_events`)
 

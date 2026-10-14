@@ -42,6 +42,14 @@
         "path": "transcripts",
         "result_data": "state"
     },
+    "conversations_participants": {
+        "tag": "transcripts",
+        "url": "/api/v2/conversations/{conversationId}",
+        "type": "unitary",
+        "method": "GET",
+        "path": "conversations_participants",
+        "result_data": "state"
+    },
     "transcript_events_url": {
         "tag": "transcript_events",
         "url": "/api/v2/speechandtextanalytics/conversations/{conversationId}/communications/{communicationId}/transcripturl",

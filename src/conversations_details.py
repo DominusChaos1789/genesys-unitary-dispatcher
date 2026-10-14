@@ -33,9 +33,11 @@ The org_id=/date-partitioned walk itself is shared with management_units.py,
 see landing_partitions.py.
 """
 
+import json
 from datetime import date, datetime
 
 from src.config import Settings
+from src.dispatcher_config import CONVERSATION_ID_KIND, SURVEY_ID_KIND, TRANSCRIPT_SESSION_ID_KIND
 from src.landing_partitions import collect_ids, organization_id_from_folder
 from src.sources import EventError
 
@@ -45,6 +47,8 @@ __all__ = [
     "collect_conversation_ids",
     "collect_survey_ids",
     "collect_transcript_session_ids",
+    "unitary_requests",
+    "collect_for_conversations",
 ]
 
 CONVERSATIONS_KEY = "endpoint"
@@ -146,3 +150,91 @@ def collect_transcript_session_ids(s3_client, settings: Settings, day: date) -> 
         "conversationId+communicationId",
         render=lambda pair: {"conversationId": pair[0], "communicationId": pair[1]},
     )
+
+
+UNITARY_CONVERSATIONS_IDS_SOURCE = "unitary_conversations"
+# id_kind -> (extractor, label, render) for the conversations_details download.
+_SPECS = {
+    CONVERSATION_ID_KIND: (_conversation_ids, "conversationId", lambda item: item),
+    SURVEY_ID_KIND: (_survey_ids, "surveyId", lambda item: item),
+    TRANSCRIPT_SESSION_ID_KIND: (
+        _transcript_session_pairs,
+        "conversationId+communicationId",
+        lambda pair: {"conversationId": pair[0], "communicationId": pair[1]},
+    ),
+}
+
+
+def unitary_requests(document) -> list[dict]:
+    """The unitary_process file -- {"tag", "date", "organization_id", "ids"},
+    or a list of those -- as validated requests. `ids` are conversation ids to
+    look up in that organization's conversations_details folder for `date`."""
+    entries = document if isinstance(document, list) else [document]
+    requests = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise EventError(f"unitary_process entry must be an object, got {entry!r}")
+        organization_id = entry.get("organization_id")
+        ids = entry.get("ids")
+        if not organization_id or not isinstance(ids, list):
+            raise EventError(f"unitary_process entry needs 'organization_id' and an 'ids' list: {entry!r}")
+        day = parse_date(entry.get("date"), UNITARY_CONVERSATIONS_IDS_SOURCE)
+        requests.append({"organization_id": organization_id, "day": day, "ids": set(ids)})
+    return requests
+
+
+def _only_conversations(extractor, wanted: set):
+    def extract(document):
+        conversations = [
+            c for c in _conversations(document) if isinstance(c, dict) and c.get("conversationId") in wanted
+        ]
+        return extractor({CONVERSATIONS_KEY: conversations})
+
+    return extract
+
+
+def collect_for_conversations(s3_client, settings: Settings, id_kind: str, requests: list[dict]) -> dict:
+    """Like the collect_* functions above, but only for the given conversations:
+    each request names an organization, a day and the conversation ids to look
+    up in that organization's conversations_details folder for that day. The
+    ids found are whatever `id_kind` needs off those conversations (surveyIds,
+    session pairs, ...). Requests are merged per organization."""
+    if id_kind not in _SPECS:
+        raise EventError(
+            f'ids_source "{UNITARY_CONVERSATIONS_IDS_SOURCE}" cannot feed id_kind {id_kind!r}; '
+            f"expected one of {sorted(_SPECS)}"
+        )
+    extractor, label, render = _SPECS[id_kind]
+
+    merged: dict[str, dict[str, object]] = {}
+    files_read = 0
+    skipped: list[str] = []
+    for request in requests:
+        outcome = collect_ids(
+            s3_client,
+            settings.conversations_details_bucket,
+            settings.conversations_details_prefix,
+            request["day"],
+            _only_conversations(extractor, request["ids"]),
+            label,
+            render=render,
+            only_organization=request["organization_id"],
+        )
+        files_read += outcome["summary"]["files_read"]
+        skipped.extend(outcome["summary"]["skipped_files"])
+        for organization_id, ids in outcome["ids_by_organization"].items():
+            bucket = merged.setdefault(organization_id, {})
+            for item in ids:
+                bucket[json.dumps(item, sort_keys=True)] = item
+
+    ids_by_organization = {org: [items[key] for key in sorted(items)] for org, items in merged.items()}
+    return {
+        "ids_by_organization": ids_by_organization,
+        "summary": {
+            "bucket": settings.conversations_details_bucket,
+            "requests": len(requests),
+            "files_read": files_read,
+            "skipped_files": skipped,
+            "conversations": {org: len(ids) for org, ids in ids_by_organization.items()},
+        },
+    }

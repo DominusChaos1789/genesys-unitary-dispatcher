@@ -184,9 +184,9 @@ steps 1-2, both S3 edits.
 | | |
 |---|---|
 | Ids | `{conversationId, communicationId}` pairs (`id_kind: "transcript_session"`) -- one per **recorded voice** participant session (`recording: true`, `mediaType: "voice"`) on a conversation record, read off the same conversations_details files surveys reads; other sessions (ivr, acd routing, ...) have no transcript to fetch and are dropped |
-| Stages | `request_url`: `GET .../conversations/{conversationId}/communications/{communicationId}/transcripturl` |
+| Stages | `request_context`: `GET /api/v2/conversations/{conversationId}` (`conversations_participants`) → `request_url`: `GET .../conversations/{conversationId}/communications/{communicationId}/transcripturl` |
 | Saved under | `transacciones/genesys/api` |
-| Next | Download calls the template once per pair -- both ids are already known, so there's no preceding search/listing call to wait on. |
+| Next | Download calls the templates once per pair -- both ids are already known, so there's no preceding search/listing call to wait on. |
 
 ### `transcript_events`
 
@@ -246,6 +246,17 @@ flowchart LR
 | Validate `date` (`YYYY-MM-DD`) | `conversations_details.parse_date` |
 | List the `org_id=` folders | `s3_utils.list_common_prefixes` |
 | Read that day's files one at a time, keeping only the ids; skip unreadable ones | `conversations_details.collect_conversation_ids` |
+
+### Specific conversations: ids for `unitary_conversations`
+
+`{"tag": "surveys", "ids_source": "unitary_conversations", "ids_location": {...}}`
+names a file the unitary process wrote under `.../genesys/unitary_process/`:
+`{"tag", "date", "organization_id", "ids"}` (or a list). The `ids` are
+conversation ids; `conversations_details.collect_for_conversations` reads only
+that organization's conversations_details folder for that `date`
+(`landing_partitions.collect_ids(only_organization=...)`), keeps just those
+conversations, and extracts what the tag's `id_kind` needs (surveyIds, session
+pairs). Requests are merged per organization.
 
 ### Real-time conversation events: ids for `transcript_events`
 

@@ -166,16 +166,17 @@ def test_adherence_is_one_job_per_management_unit(aws):
     assert status["result_data"] == "status"
 
 
-def test_transcripts_is_a_single_url_call(aws):
+def test_transcripts_is_a_conversation_lookup_then_the_transcript_url(aws):
     pair = {"conversationId": "conv-1", "communicationId": "comm-1"}
     result = run(
         {"tag": "transcripts", "organizations": [{"organization_id": "org-1", "ids": [pair]}]}, _context()
     )
 
-    assert responses_for(result)[0]["stages"] == ["request_url"]
+    assert responses_for(result)[0]["stages"] == ["request_context", "request_url"]
     entry = read_payload(result)
     assert entry["ids"] == [pair]
-    assert "request_context" not in entry
+    assert entry["request_context"]["url"] == "/api/v2/conversations/{conversationId}"
+    assert entry["request_context"]["path"] == "conversations_participants"
 
     url_stage = entry["request_url"]
     assert url_stage["url"].startswith(

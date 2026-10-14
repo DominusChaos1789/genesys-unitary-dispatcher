@@ -42,6 +42,14 @@ Ids sources:
   alternative to `ids_location`/an S3 event when the units aren't already
   grouped by organization in one file.
 
+- "unitary_conversations": a file the unitary process drops under
+  transacciones/genesys/unitary_process/ -- {"tag", "date", "organization_id",
+  "ids"} -- named by the event (`ids_location`, or the S3 event's `detail`).
+  Its `ids` are conversation ids, looked up in that organization's
+  conversations_details folder for that date, and turned into whatever the
+  tag's id_kind needs (surveyIds, session pairs). Only for the id_kinds
+  conversations_details can feed.
+
 Every organization's payload also carries a top-level `date`: the event's
 `date` when the run used one of the two sources above, otherwise today's date
 (UTC) -- the day the run happened, since inline/contracts-sourced runs have
@@ -81,10 +89,13 @@ import boto3
 import src.s3_utils as s3_utils
 from src.config import Settings, load_settings
 from src.conversations_details import (
+    UNITARY_CONVERSATIONS_IDS_SOURCE,
     collect_conversation_ids,
+    collect_for_conversations,
     collect_survey_ids,
     collect_transcript_session_ids,
     parse_date,
+    unitary_requests,
 )
 from src.dispatcher_config import (
     MANAGEMENT_UNIT_SCHEDULE_ID_KIND,
@@ -100,7 +111,13 @@ from src.dispatcher_config import (
 from src.endpoints import load_endpoint_catalog, select_stages
 from src.management_units import collect_management_unit_business_unit_pairs, collect_management_unit_ids
 from src.payload import build_organization_entry, build_organization_payload, output_base_path
-from src.sources import ALL_TAGS, EventError, resolve_ids_by_organization, resolve_tag_selection
+from src.sources import (
+    ALL_TAGS,
+    EventError,
+    read_ids_document,
+    resolve_ids_by_organization,
+    resolve_tag_selection,
+)
 from src.token_manager import get_token, load_config
 from src.transcript_events import resolve_transcript_events
 
@@ -110,7 +127,12 @@ logger.setLevel(logging.INFO)
 CONTRACTS_IDS_SOURCE = "contracts"
 CONVERSATIONS_DETAILS_IDS_SOURCE = "conversations_details"
 MANAGEMENT_UNIT_LIST_IDS_SOURCE = "management_unit_list"
-IDS_SOURCES = (CONTRACTS_IDS_SOURCE, CONVERSATIONS_DETAILS_IDS_SOURCE, MANAGEMENT_UNIT_LIST_IDS_SOURCE)
+IDS_SOURCES = (
+    CONTRACTS_IDS_SOURCE,
+    CONVERSATIONS_DETAILS_IDS_SOURCE,
+    MANAGEMENT_UNIT_LIST_IDS_SOURCE,
+    UNITARY_CONVERSATIONS_IDS_SOURCE,
+)
 
 
 def _server_key(organization_id: str) -> str:
@@ -180,6 +202,14 @@ def _resolve_ids(s3_client, settings: Settings, event: dict, execution_id: str, 
             outcome = collect_management_unit_business_unit_pairs(s3_client, settings, day)
         else:
             outcome = collect_management_unit_ids(s3_client, settings, day)
+        ids_by_organization, summary, summary_key = (
+            outcome["ids_by_organization"],
+            outcome["summary"],
+            ids_source,
+        )
+    elif ids_source == UNITARY_CONVERSATIONS_IDS_SOURCE:
+        document, _ = read_ids_document(s3_client, settings, event)
+        outcome = collect_for_conversations(s3_client, settings, id_kind, unitary_requests(document))
         ids_by_organization, summary, summary_key = (
             outcome["ids_by_organization"],
             outcome["summary"],

@@ -35,13 +35,15 @@ def collect_ids(
     label: str,
     render: Callable = lambda x: x,
     counts_key: str = "conversations",
+    only_organization: str | None = None,
 ) -> dict:
     """The day's ids (as picked out by `extractor`, deduplicated as whatever
     hashable value it returns) grouped by organization, plus a summary for
     the Lambda's response. `render` turns each deduplicated item into the
     value that actually goes in `ids_by_organization` -- identity for plain
-    ids, tuple-to-dict for pairs. Files are read one at a time, keeping only
-    the ids."""
+    ids, tuple-to-dict for pairs. `only_organization` ("org-3") restricts the
+    walk to that one organization's folder. Files are read one at a time,
+    keeping only the ids."""
     prefix = prefix.rstrip("/") + "/"
     day_path = f"year={day.year:04d}/month={day.month:02d}/day={day.day:02d}/"
 
@@ -53,6 +55,8 @@ def collect_ids(
         organization_id = organization_id_from_folder(folder)
         if organization_id is None:
             logger.warning("Ignoring s3://%s/%s: not an org_id= folder", bucket, folder)
+            continue
+        if only_organization is not None and organization_id != only_organization:
             continue
         for key in s3_utils.list_json_keys(s3_client, bucket, f"{folder}{day_path}"):
             try:

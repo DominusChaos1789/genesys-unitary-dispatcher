@@ -149,10 +149,11 @@ def test_a_tagged_endpoint_whose_type_maps_to_no_stage_is_an_error():
         select_stages(catalog, "surveys")
 
 
-def test_transcripts_is_a_single_url_stage():
+def test_transcripts_is_the_conversation_lookup_then_the_transcript_url():
     stages = select_stages(_catalog(), "transcripts")
 
-    assert list(stages) == ["request_url"]
+    assert list(stages) == ["request_context", "request_url"]
+    assert stages["request_context"][0] == "conversations_participants"
     assert stages["request_url"][0] == "transcripts_url"
 
 

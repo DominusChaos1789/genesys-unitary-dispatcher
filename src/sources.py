@@ -78,6 +78,17 @@ def _sort_key(item):
     return item if isinstance(item, str) else json.dumps(item, sort_keys=True)
 
 
+def read_ids_document(s3_client, settings: Settings, event: dict):
+    """The JSON file the event points at (`ids_location`, or an S3 "Object
+    Created" event's `detail`), for ids sources whose file isn't the plain
+    organizations list."""
+    location = _ids_location(event)
+    if location is None:
+        raise EventError("Event carries no file: expected 'ids_location' or an S3 event 'detail'")
+    bucket, key = location
+    return s3_utils.read_json(s3_client, settings.resolve_bucket(bucket), key), key
+
+
 def _group(organizations) -> dict[str, list]:
     """{organization_id: unique ids, sorted}. Repeated organizations merge;
     organizations left with no ids are dropped."""

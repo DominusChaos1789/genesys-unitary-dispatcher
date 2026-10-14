@@ -23,6 +23,7 @@ TRANSCRIPT_EVENT_KEY = (
     "transacciones/genesys/real_time_tmp_events/transcript_events/"
     "org_id=1/00000000-0000-4000-8000-000000000003.json"
 )
+UNITARY_PROCESS_KEY = "transacciones/genesys/unitary_process/request-1.json"
 MANAGEMENT_UNIT_LIST_KEY = (
     "funcionarios/genesys/api/management_unit_list/org_id=1/year=2026/month=08/day=13/units.json"
 )
@@ -45,6 +46,7 @@ SUCCEEDS = {
     "17-adherence-mu-list.json": {("funcionarios_adherencia", "org-1"): 2},
     "18-programaciones-inline.json": {("funcionarios_programaciones", "org-1"): 1},
     "19-programaciones-mu-list.json": {("funcionarios_programaciones", "org-1"): 2},
+    "20-unitary-conversations.json": {("surveys", "org-1"): 1},
 }
 # event file -> error message the run must fail with
 FAILS = {
@@ -96,6 +98,18 @@ def seeded_landing(aws, seeded_source_files):
                     {"id": "mu-1", "name": "MU_ONE", "businessUnit": {"id": "bu-1"}},
                     {"id": "mu-2", "name": "MU_TWO", "businessUnit": {"id": "bu-2"}},
                 ]
+            }
+        ),
+    )
+    s3.put_object(
+        Bucket=LANDING_BUCKET,
+        Key=UNITARY_PROCESS_KEY,
+        Body=json.dumps(
+            {
+                "tag": "surveys",
+                "date": "2026-08-13",
+                "organization_id": "org-1",
+                "ids": ["0c1d2e3f-1111-4aaa-8bbb-000000000001"],
             }
         ),
     )
