@@ -251,6 +251,30 @@ conversations_details can feed (`conversation`, `survey`, `transcript_session`);
 any other tag is rejected. The file's own `tag` isn't used — the event's is.
 Conversations not found in the folder simply produce no ids.
 
+#### Same source, as a CSV
+
+The unitary process can instead leave a **CSV** in the output bucket
+(`augusta-nexa-<env>-output`), and the event points at it the same way:
+
+```json
+{"tag": "transcripts", "ids_source": "unitary_conversations",
+ "ids_location": {"bucket": "output",
+                  "key": "transacciones/genesys/unitary_process/transcripts/<file>.csv"}}
+```
+
+```csv
+conversationId,communicationId,cliente_prefijo,Organizacion
+ce7c1e02-...,7AA46369-...,BPP,org-3
+e1336a8d-...,41B313FC-...,BDB,org-2
+```
+
+Rows are grouped by `Organizacion` into `{conversationId, communicationId}`
+pairs and each organization gets its payload as usual; duplicate rows collapse
+and rows missing a value are skipped (counted in `unitary_conversations.skipped_rows`).
+A CSV only carries conversation/communication ids, so it can feed
+`transcripts` (and plain `conversation` tags) but not `surveys`. `cliente_prefijo`
+isn't used. A `.csv` key is what selects this; a `.json` key is the format above.
+
 ### Ids from real-time conversation events (`transcript_events`)
 
 ```json

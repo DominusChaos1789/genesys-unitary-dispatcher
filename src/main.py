@@ -42,6 +42,10 @@ Ids sources:
   alternative to `ids_location`/an S3 event when the units aren't already
   grouped by organization in one file.
 
+- "unitary_conversations" (CSV): the unitary process can instead leave a CSV
+  (conversationId, communicationId, cliente_prefijo, Organizacion) in the
+  output bucket; its rows are grouped by Organizacion into
+  {conversationId, communicationId} pairs, for transcripts.
 - "unitary_conversations": a file the unitary process drops under
   transacciones/genesys/unitary_process/ -- {"tag", "date", "organization_id",
   "ids"} -- named by the event (`ids_location`, or the S3 event's `detail`).
@@ -92,6 +96,7 @@ from src.conversations_details import (
     UNITARY_CONVERSATIONS_IDS_SOURCE,
     collect_conversation_ids,
     collect_for_conversations,
+    collect_from_csv,
     collect_survey_ids,
     collect_transcript_session_ids,
     parse_date,
@@ -152,6 +157,16 @@ def _expand_tags(selection: list[str] | str, dispatcher: dict) -> list[str]:
     return tags
 
 
+def _unitary_conversations(s3_client, settings: Settings, event: dict, id_kind: str) -> dict:
+    """The unitary process' file: a CSV of conversation/communication ids with
+    their organization, or a JSON {tag, date, organization_id, ids} to look up
+    in conversations_details."""
+    document, file_key = read_ids_document(s3_client, settings, event)
+    if file_key.lower().endswith(".csv"):
+        return collect_from_csv(id_kind, document, file_key)
+    return collect_for_conversations(s3_client, settings, id_kind, unitary_requests(document))
+
+
 def _resolve_ids(s3_client, settings: Settings, event: dict, execution_id: str, id_kind: str):
     """(ids by organization, source summary or None, summary key or None).
 
@@ -208,8 +223,7 @@ def _resolve_ids(s3_client, settings: Settings, event: dict, execution_id: str, 
             ids_source,
         )
     elif ids_source == UNITARY_CONVERSATIONS_IDS_SOURCE:
-        document, _ = read_ids_document(s3_client, settings, event)
-        outcome = collect_for_conversations(s3_client, settings, id_kind, unitary_requests(document))
+        outcome = _unitary_conversations(s3_client, settings, event, id_kind)
         ids_by_organization, summary, summary_key = (
             outcome["ids_by_organization"],
             outcome["summary"],

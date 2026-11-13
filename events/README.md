@@ -45,6 +45,7 @@ otherwise the day the run happened.
 | `18-programaciones-inline` | funcionarios_programaciones for one `{managementUnitId, businessUnitId}` pair sent in the event | token + payload | list of 1: `stages: ["request_context", "request_status", "request_activity"]` |
 | `19-programaciones-mu-list` | funcionarios_programaciones for every management unit downloaded on 2026-08-13 | reads the landing files (never deletes them) | same shape as `17`, one flow (`funcionarios_programaciones`) |
 | `20-unitary-conversations` | surveys for just the conversations listed in a `unitary_process` file | reads that file and the matching conversations_details folder (never deletes) | list with one entry per organization in the file |
+| `21-unitary-csv` | transcripts from a CSV the unitary process left in the output bucket | reads that CSV (never deletes it) | one entry per `Organizacion` in the CSV |
 | `06-surveys-contracts` | the hourly contracts process, then surveys | ⚠️ **writes parquet to refined and deletes the processed transcription files in providers-landing** | list with one entry per contract's organization; contract counts are in the `Run summary` log line |
 
 Every successful run writes one **flat** file per (tag, organization) pair to a

@@ -258,6 +258,12 @@ that organization's conversations_details folder for that `date`
 conversations, and extracts what the tag's `id_kind` needs (surveyIds, session
 pairs). Requests are merged per organization.
 
+If the file is a `.csv` instead (output bucket; columns `conversationId,
+communicationId, cliente_prefijo, Organizacion`), `conversations_details.collect_from_csv`
+groups its rows by `Organizacion` into `{conversationId, communicationId}`
+pairs -- no conversations_details lookup -- for `transcripts` or plain
+conversation tags (not `surveys`).
+
 ### Real-time conversation events: ids for `transcript_events`
 
 `{"tag": "transcript_events", "organizations": [{"organization_id": "org-1", "ids": ["<event_id>", "..."]}]}`

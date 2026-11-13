@@ -152,3 +152,100 @@ def test_an_id_kind_conversations_details_cannot_feed_is_rejected(aws):
 
     with pytest.raises(EventError, match="cannot feed id_kind 'management_unit'"):
         run({**EVENT, "tag": "funcionarios_adherencia"}, _context())
+
+
+CSV_KEY = "transacciones/genesys/unitary_process/transcripts/req.csv"
+CSV_EVENT = {
+    "tag": "transcripts",
+    "ids_source": "unitary_conversations",
+    "ids_location": {"bucket": "output", "key": CSV_KEY},
+}
+CSV_HEADER = "conversationId,communicationId,cliente_prefijo,Organizacion\n"
+
+
+def _put_csv(s3, *rows, key=CSV_KEY, header=CSV_HEADER):
+    body = header + "".join(f"{row}\n" for row in rows)
+    s3.put_object(Bucket="augusta-nexa-dev-output", Key=key, Body=body.encode("utf-8"))
+
+
+@pytest.fixture
+def output_bucket(aws):
+    aws["s3"].create_bucket(Bucket="augusta-nexa-dev-output")
+    return aws["s3"]
+
+
+def test_a_csv_builds_each_organizations_pairs(output_bucket):
+    _put_csv(
+        output_bucket,
+        "c1,P1,BPP,org-3",
+        "c2,P2,BDB,org-2",
+        "c3,P3,BDO,org-3",
+        "c3,P4,BDO,org-3",
+    )
+
+    result = run(CSV_EVENT, _context())
+
+    by_org = payload_by_org(result)
+    assert by_org["org-3"]["ids"] == [
+        {"conversationId": "c1", "communicationId": "P1"},
+        {"conversationId": "c3", "communicationId": "P3"},
+        {"conversationId": "c3", "communicationId": "P4"},
+    ]
+    assert by_org["org-2"]["ids"] == [{"conversationId": "c2", "communicationId": "P2"}]
+    assert result["unitary_conversations"]["rows"] == 4
+    assert result["unitary_conversations"]["conversations"] == {"org-2": 1, "org-3": 3}
+
+
+def test_duplicate_csv_rows_collapse(output_bucket):
+    _put_csv(output_bucket, "c1,P1,BDB,org-2", "c1,P1,BDB,org-2", "c1,P1,BDB,org-2")
+
+    result = run(CSV_EVENT, _context())
+
+    assert payload_by_org(result)["org-2"]["ids"] == [{"conversationId": "c1", "communicationId": "P1"}]
+
+
+def test_csv_rows_missing_a_value_are_skipped_and_counted(output_bucket):
+    _put_csv(output_bucket, "c1,P1,BDB,org-2", "c2,,BDB,org-2", ",P3,BDB,org-2", "c4,P4,BDB,")
+
+    result = run(CSV_EVENT, _context())
+
+    assert payload_by_org(result)["org-2"]["ids"] == [{"conversationId": "c1", "communicationId": "P1"}]
+    assert result["unitary_conversations"]["skipped_rows"] == 3
+
+
+def test_a_csv_can_feed_plain_conversation_ids(output_bucket):
+    s3 = output_bucket
+    _put_csv(s3, "c1,,BDB,org-2", "c2,P2,BDB,org-2")
+    config = json.loads(
+        s3.get_object(Bucket="augusta-nexa-dev-resources", Key="params/genesys/api/dispatcher.json")[
+            "Body"
+        ].read()
+    )
+    config["flows"]["surveys"]["id_kind"] = "conversation"
+    s3.put_object(
+        Bucket="augusta-nexa-dev-resources", Key="params/genesys/api/dispatcher.json", Body=json.dumps(config)
+    )
+
+    result = run({**CSV_EVENT, "tag": "surveys"}, _context())
+
+    assert payload_by_org(result)["org-2"]["ids"] == ["c1", "c2"]
+
+
+def test_a_csv_cannot_feed_surveys(output_bucket):
+    _put_csv(output_bucket, "c1,P1,BDB,org-2")
+
+    with pytest.raises(EventError, match="CSV cannot feed id_kind 'survey'"):
+        run({**CSV_EVENT, "tag": "surveys"}, _context())
+
+
+def test_a_csv_without_the_expected_columns_is_rejected(output_bucket):
+    _put_csv(output_bucket, "c1,P1", header="conversationId,communicationId\n")
+
+    with pytest.raises(EventError, match="needs the columns"):
+        run(CSV_EVENT, _context())
+
+
+def test_an_empty_csv_produces_no_payload(output_bucket):
+    _put_csv(output_bucket)
+
+    assert run(CSV_EVENT, _context())["responses"] == []

@@ -183,6 +183,55 @@ def unitary_requests(document) -> list[dict]:
     return requests
 
 
+_CSV_COLUMNS = ("conversationId", "communicationId", "Organizacion")
+
+
+def collect_from_csv(id_kind: str, rows: list[dict], file_key: str = "") -> dict:
+    """The unitary process' CSV -- one row per conversation/communication with
+    its organization (`Organizacion`, "org-3") -- as ids by organization, for
+    the id_kinds a conversation/communication list can feed: "transcript_session"
+    ({conversationId, communicationId} pairs) and "conversation". Duplicate
+    rows collapse; rows missing a needed column are skipped and counted."""
+    if id_kind not in (TRANSCRIPT_SESSION_ID_KIND, CONVERSATION_ID_KIND):
+        raise EventError(
+            f'ids_source "{UNITARY_CONVERSATIONS_IDS_SOURCE}" with a CSV cannot feed id_kind {id_kind!r}; '
+            f"a CSV carries conversation/communication ids only"
+        )
+    if rows and not set(_CSV_COLUMNS) <= set(rows[0]):
+        raise EventError(f"CSV {file_key!r} needs the columns {list(_CSV_COLUMNS)}, got {list(rows[0])}")
+
+    merged: dict[str, dict[str, object]] = {}
+    skipped = 0
+    for row in rows:
+        organization_id = (row.get("Organizacion") or "").strip()
+        conversation_id = (row.get("conversationId") or "").strip()
+        communication_id = (row.get("communicationId") or "").strip()
+        if (
+            not organization_id
+            or not conversation_id
+            or (id_kind == TRANSCRIPT_SESSION_ID_KIND and not communication_id)
+        ):
+            skipped += 1
+            continue
+        item = (
+            {"conversationId": conversation_id, "communicationId": communication_id}
+            if id_kind == TRANSCRIPT_SESSION_ID_KIND
+            else conversation_id
+        )
+        merged.setdefault(organization_id, {})[json.dumps(item, sort_keys=True)] = item
+
+    ids_by_organization = {org: [items[key] for key in sorted(items)] for org, items in merged.items()}
+    return {
+        "ids_by_organization": ids_by_organization,
+        "summary": {
+            "file": file_key,
+            "rows": len(rows),
+            "skipped_rows": skipped,
+            "conversations": {org: len(ids) for org, ids in ids_by_organization.items()},
+        },
+    }
+
+
 def _only_conversations(extractor, wanted: set):
     def extract(document):
         conversations = [

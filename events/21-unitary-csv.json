@@ -1,0 +1,8 @@
+{
+  "tag": "transcripts",
+  "ids_source": "unitary_conversations",
+  "ids_location": {
+    "bucket": "output",
+    "key": "transacciones/genesys/unitary_process/transcripts/4d16aedd-20ab-4750-a6bb-b726f4181462.csv"
+  }
+}

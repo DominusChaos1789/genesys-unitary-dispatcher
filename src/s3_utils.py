@@ -38,6 +38,10 @@ def read_json(s3_client, bucket: str, key: str) -> Any:
     return json.loads(body.decode("utf-8-sig"))
 
 
+def read_text(s3_client, bucket: str, key: str) -> str:
+    return s3_client.get_object(Bucket=bucket, Key=key)["Body"].read().decode("utf-8-sig")
+
+
 def read_json_files(s3_client, bucket: str, keys: Iterable[str]) -> tuple[list[Any], list[str], list[str]]:
     """Reads every key as JSON, tolerating individual bad files (empty objects,
     corrupted uploads) instead of failing the whole batch.

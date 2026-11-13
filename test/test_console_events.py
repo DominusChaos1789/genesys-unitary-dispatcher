@@ -24,6 +24,8 @@ TRANSCRIPT_EVENT_KEY = (
     "org_id=1/00000000-0000-4000-8000-000000000003.json"
 )
 UNITARY_PROCESS_KEY = "transacciones/genesys/unitary_process/request-1.json"
+UNITARY_CSV_KEY = "transacciones/genesys/unitary_process/transcripts/4d16aedd-20ab-4750-a6bb-b726f4181462.csv"
+OUTPUT_BUCKET = "augusta-nexa-dev-output"
 MANAGEMENT_UNIT_LIST_KEY = (
     "funcionarios/genesys/api/management_unit_list/org_id=1/year=2026/month=08/day=13/units.json"
 )
@@ -47,6 +49,7 @@ SUCCEEDS = {
     "18-programaciones-inline.json": {("funcionarios_programaciones", "org-1"): 1},
     "19-programaciones-mu-list.json": {("funcionarios_programaciones", "org-1"): 2},
     "20-unitary-conversations.json": {("surveys", "org-1"): 1},
+    "21-unitary-csv.json": {("transcripts", "org-1"): 2, ("transcripts", "org-3"): 1},
 }
 # event file -> error message the run must fail with
 FAILS = {
@@ -112,6 +115,20 @@ def seeded_landing(aws, seeded_source_files):
                 "ids": ["0c1d2e3f-1111-4aaa-8bbb-000000000001"],
             }
         ),
+    )
+    s3.create_bucket(Bucket=OUTPUT_BUCKET)
+    s3.put_object(
+        Bucket=OUTPUT_BUCKET,
+        Key=UNITARY_CSV_KEY,
+        Body="\n".join(
+            [
+                "conversationId,communicationId,cliente_prefijo,Organizacion",
+                "c1,P1,BDB,org-1",
+                "c2,P2,BDB,org-1",
+                "c2,P2,BDB,org-1",
+                "c3,P3,BPP,org-3",
+            ]
+        ).encode("utf-8"),
     )
     return s3
 

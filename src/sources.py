@@ -16,6 +16,8 @@ bucket and key come from `detail`, and the tag(s) from the top level or from
 organizations list, bare or as {"organizations": [...]}.
 """
 
+import csv
+import io
 import json
 
 import src.s3_utils as s3_utils
@@ -86,7 +88,10 @@ def read_ids_document(s3_client, settings: Settings, event: dict):
     if location is None:
         raise EventError("Event carries no file: expected 'ids_location' or an S3 event 'detail'")
     bucket, key = location
-    return s3_utils.read_json(s3_client, settings.resolve_bucket(bucket), key), key
+    bucket = settings.resolve_bucket(bucket)
+    if key.lower().endswith(".csv"):
+        return list(csv.DictReader(io.StringIO(s3_utils.read_text(s3_client, bucket, key)))), key
+    return s3_utils.read_json(s3_client, bucket, key), key
 
 
 def _group(organizations) -> dict[str, list]:
