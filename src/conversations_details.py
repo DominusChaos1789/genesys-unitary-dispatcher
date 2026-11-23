@@ -37,7 +37,12 @@ import json
 from datetime import date, datetime
 
 from src.config import Settings
-from src.dispatcher_config import CONVERSATION_ID_KIND, SURVEY_ID_KIND, TRANSCRIPT_SESSION_ID_KIND
+from src.dispatcher_config import (
+    CONVERSATION_ID_KIND,
+    RECORDING_ID_KIND,
+    SURVEY_ID_KIND,
+    TRANSCRIPT_SESSION_ID_KIND,
+)
 from src.landing_partitions import collect_ids, organization_id_from_folder
 from src.sources import EventError
 
@@ -47,6 +52,7 @@ __all__ = [
     "collect_conversation_ids",
     "collect_survey_ids",
     "collect_transcript_session_ids",
+    "collect_recorded_conversation_ids",
     "unitary_requests",
     "collect_for_conversations",
 ]
@@ -112,6 +118,37 @@ def _transcript_session_pairs(document) -> list[tuple[str, str]]:
     return pairs
 
 
+def _recorded_conversation_ids(document) -> list[str]:
+    """Conversations with at least one recorded session (`recording: true`) --
+    what recordings (id_kind "recording") needs: a conversation without one
+    has no recording to list."""
+    return [
+        c["conversationId"]
+        for c in _conversations(document)
+        if isinstance(c, dict)
+        and c.get("conversationId")
+        and any(
+            isinstance(session, dict) and session.get("recording") is True
+            for participant in (c.get("participants") or [])
+            if isinstance(participant, dict)
+            for session in (participant.get("sessions") or [])
+        )
+    ]
+
+
+def collect_recorded_conversation_ids(s3_client, settings: Settings, day: date) -> dict:
+    """The day's recorded conversation ids grouped by organization -- for
+    "recording" id_kind flows (recordings)."""
+    return collect_ids(
+        s3_client,
+        settings.conversations_details_bucket,
+        settings.conversations_details_prefix,
+        day,
+        _recorded_conversation_ids,
+        "conversationId",
+    )
+
+
 def collect_conversation_ids(s3_client, settings: Settings, day: date) -> dict:
     """The day's conversation ids grouped by organization -- for the generic
     "conversation" id_kind."""
@@ -157,6 +194,7 @@ UNITARY_CONVERSATIONS_IDS_SOURCE = "unitary_conversations"
 _SPECS = {
     CONVERSATION_ID_KIND: (_conversation_ids, "conversationId", lambda item: item),
     SURVEY_ID_KIND: (_survey_ids, "surveyId", lambda item: item),
+    RECORDING_ID_KIND: (_recorded_conversation_ids, "conversationId", lambda item: item),
     TRANSCRIPT_SESSION_ID_KIND: (
         _transcript_session_pairs,
         "conversationId+communicationId",
@@ -183,28 +221,49 @@ def unitary_requests(document) -> list[dict]:
     return requests
 
 
-_CSV_COLUMNS = ("conversationId", "communicationId", "Organizacion")
+# The conversation id column: "conversationId" (transcripts' CSV) or
+# "conversacion_id" (recordings' CSV, straight off the curated sessions table).
+_CSV_CONVERSATION_COLUMNS = ("conversationId", "conversacion_id")
+_CSV_ORGANIZATION_COLUMN = "Organizacion"
+_CSV_COMMUNICATION_COLUMN = "communicationId"
+_CSV_ID_KINDS = (TRANSCRIPT_SESSION_ID_KIND, CONVERSATION_ID_KIND, RECORDING_ID_KIND)
+
+
+def _csv_conversation_column(rows: list[dict], id_kind: str, file_key: str) -> str:
+    columns = list(rows[0]) if rows else []
+    conversation_column = next((c for c in _CSV_CONVERSATION_COLUMNS if c in columns), None)
+    needed = [_CSV_ORGANIZATION_COLUMN] + (
+        [_CSV_COMMUNICATION_COLUMN] if id_kind == TRANSCRIPT_SESSION_ID_KIND else []
+    )
+    if rows and (conversation_column is None or not set(needed) <= set(columns)):
+        raise EventError(
+            f"CSV {file_key!r} needs a conversation id column ({' or '.join(_CSV_CONVERSATION_COLUMNS)}) "
+            f"and {needed}, got {columns}"
+        )
+    return conversation_column or _CSV_CONVERSATION_COLUMNS[0]
 
 
 def collect_from_csv(id_kind: str, rows: list[dict], file_key: str = "") -> dict:
-    """The unitary process' CSV -- one row per conversation/communication with
-    its organization (`Organizacion`, "org-3") -- as ids by organization, for
-    the id_kinds a conversation/communication list can feed: "transcript_session"
-    ({conversationId, communicationId} pairs) and "conversation". Duplicate
-    rows collapse; rows missing a needed column are skipped and counted."""
-    if id_kind not in (TRANSCRIPT_SESSION_ID_KIND, CONVERSATION_ID_KIND):
+    """The unitary process' CSV -- one row per conversation (and, for
+    transcripts, communication) with its organization (`Organizacion`,
+    "org-3") -- as ids by organization, for the id_kinds a conversation list
+    can feed: "transcript_session" ({conversationId, communicationId} pairs,
+    needs `communicationId`), "conversation" and "recording" (conversation
+    ids). The conversation column is `conversationId` or `conversacion_id`.
+    Duplicate rows collapse; rows missing a needed value are skipped and
+    counted."""
+    if id_kind not in _CSV_ID_KINDS:
         raise EventError(
             f'ids_source "{UNITARY_CONVERSATIONS_IDS_SOURCE}" with a CSV cannot feed id_kind {id_kind!r}; '
             f"a CSV carries conversation/communication ids only"
         )
-    if rows and not set(_CSV_COLUMNS) <= set(rows[0]):
-        raise EventError(f"CSV {file_key!r} needs the columns {list(_CSV_COLUMNS)}, got {list(rows[0])}")
+    conversation_column = _csv_conversation_column(rows, id_kind, file_key)
 
     merged: dict[str, dict[str, object]] = {}
     skipped = 0
     for row in rows:
-        organization_id = (row.get("Organizacion") or "").strip()
-        conversation_id = (row.get("conversationId") or "").strip()
+        organization_id = (row.get(_CSV_ORGANIZATION_COLUMN) or "").strip()
+        conversation_id = (row.get(conversation_column) or "").strip()
         communication_id = (row.get("communicationId") or "").strip()
         if (
             not organization_id

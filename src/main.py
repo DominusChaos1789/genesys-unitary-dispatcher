@@ -10,6 +10,8 @@ every stage of that flow (payload.py):
     surveys                     -> request_context
     transcripts                 -> request_url
     transcript_events           -> request_url (same endpoint, ids from real-time events)
+    recordings                  -> request_context (list a conversation's recordings),
+                                    request_url (each recording's download URL)
     funcionarios_adherencia     -> request_init, request_status (one job per management unit)
     funcionarios_programaciones -> request_context, request_status,
                                     request_activity (one {managementUnitId,
@@ -46,6 +48,16 @@ Ids sources:
   (conversationId, communicationId, cliente_prefijo, Organizacion) in the
   output bucket; its rows are grouped by Organizacion into
   {conversationId, communicationId} pairs, for transcripts.
+- "unitary_conversations" (CSV, recordings): same, with `conversacion_id`
+  instead of conversationId and no communicationId -- conversation ids.
+- "unitary_conversations" (Firehose file, transcript_events): the real-time
+  events' extensionless delivery file, one JSON record per line, carrying
+  {conversationId, communicationId} pairs per Genesys organization id
+  (mapped to "org-N" by the TEMPORARY config.GENESYS_ORGANIZATIONS).
+- "unitary_conversations" with a `date` and no file (recordings): the day's
+  recorded conversations from Athena, optionally narrowed by
+  cliente_prefijo/operacion_prefijo/organization_id
+  (recorded_conversations.py).
 - "unitary_conversations": a file the unitary process drops under
   transacciones/genesys/unitary_process/ -- {"tag", "date", "organization_id",
   "ids"} -- named by the event (`ids_location`, or the S3 event's `detail`).
@@ -97,6 +109,7 @@ from src.conversations_details import (
     collect_conversation_ids,
     collect_for_conversations,
     collect_from_csv,
+    collect_recorded_conversation_ids,
     collect_survey_ids,
     collect_transcript_session_ids,
     parse_date,
@@ -104,6 +117,7 @@ from src.conversations_details import (
 )
 from src.dispatcher_config import (
     MANAGEMENT_UNIT_SCHEDULE_ID_KIND,
+    RECORDING_ID_KIND,
     SURVEY_ID_KIND,
     TRANSCRIPT_EVENT_ID_KIND,
     TRANSCRIPT_SESSION_ID_KIND,
@@ -119,12 +133,14 @@ from src.payload import build_organization_entry, build_organization_payload, ou
 from src.sources import (
     ALL_TAGS,
     EventError,
+    has_ids_location,
     read_ids_document,
     resolve_ids_by_organization,
     resolve_tag_selection,
 )
 from src.token_manager import get_token, load_config
-from src.transcript_events import resolve_transcript_events
+from src.recorded_conversations import collect_recorded_conversations
+from src.transcript_events import collect_from_firehose, resolve_transcript_events
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -138,6 +154,15 @@ IDS_SOURCES = (
     MANAGEMENT_UNIT_LIST_IDS_SOURCE,
     UNITARY_CONVERSATIONS_IDS_SOURCE,
 )
+
+
+# conversations_details collector per id_kind; any other kind gets the
+# conversation ids themselves.
+_CONVERSATIONS_DETAILS_COLLECTORS = {
+    SURVEY_ID_KIND: collect_survey_ids,
+    TRANSCRIPT_SESSION_ID_KIND: collect_transcript_session_ids,
+    RECORDING_ID_KIND: collect_recorded_conversation_ids,
+}
 
 
 def _server_key(organization_id: str) -> str:
@@ -158,12 +183,24 @@ def _expand_tags(selection: list[str] | str, dispatcher: dict) -> list[str]:
 
 
 def _unitary_conversations(s3_client, settings: Settings, event: dict, id_kind: str) -> dict:
-    """The unitary process' file: a CSV of conversation/communication ids with
-    their organization, or a JSON {tag, date, organization_id, ids} to look up
-    in conversations_details."""
+    """The unitary process' file -- a CSV of conversation (and communication)
+    ids with their organization; for transcript_events, a Firehose file of
+    real-time events; otherwise a JSON {tag, date, organization_id, ids} to
+    look up in conversations_details. With no file but a `date`, recordings'
+    recorded conversations of that day, from Athena."""
+    if not has_ids_location(event) and event.get("date") is not None:
+        if id_kind != RECORDING_ID_KIND:
+            raise EventError(
+                f'ids_source "{UNITARY_CONVERSATIONS_IDS_SOURCE}" by date (no file) only feeds id_kind '
+                f'"{RECORDING_ID_KIND}", not {id_kind!r}'
+            )
+        day = parse_date(event["date"], UNITARY_CONVERSATIONS_IDS_SOURCE)
+        return collect_recorded_conversations(settings, day, event)
     document, file_key = read_ids_document(s3_client, settings, event)
     if file_key.lower().endswith(".csv"):
         return collect_from_csv(id_kind, document, file_key)
+    if id_kind == TRANSCRIPT_EVENT_ID_KIND:
+        return collect_from_firehose(document, file_key)
     return collect_for_conversations(s3_client, settings, id_kind, unitary_requests(document))
 
 
@@ -200,12 +237,8 @@ def _resolve_ids(s3_client, settings: Settings, event: dict, execution_id: str, 
         )
     elif ids_source == CONVERSATIONS_DETAILS_IDS_SOURCE:
         day = parse_date(event.get("date"), ids_source)
-        if id_kind == SURVEY_ID_KIND:
-            outcome = collect_survey_ids(s3_client, settings, day)
-        elif id_kind == TRANSCRIPT_SESSION_ID_KIND:
-            outcome = collect_transcript_session_ids(s3_client, settings, day)
-        else:
-            outcome = collect_conversation_ids(s3_client, settings, day)
+        collect = _CONVERSATIONS_DETAILS_COLLECTORS.get(id_kind, collect_conversation_ids)
+        outcome = collect(s3_client, settings, day)
         ids_by_organization, summary, summary_key = (
             outcome["ids_by_organization"],
             outcome["summary"],
@@ -232,7 +265,8 @@ def _resolve_ids(s3_client, settings: Settings, event: dict, execution_id: str, 
     else:
         raise EventError(f"Unknown ids_source {ids_source!r}; expected one of {sorted(IDS_SOURCES)}")
 
-    if id_kind == TRANSCRIPT_EVENT_ID_KIND:
+    # A Firehose file (unitary_conversations) carries the pairs already.
+    if id_kind == TRANSCRIPT_EVENT_ID_KIND and ids_source != UNITARY_CONVERSATIONS_IDS_SOURCE:
         outcome = resolve_transcript_events(s3_client, settings, ids_by_organization)
         ids_by_organization, summary, summary_key = (
             outcome["ids_by_organization"],

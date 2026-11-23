@@ -35,11 +35,11 @@ def _read(s3, response: dict) -> dict:
 def _add_recordings_flow(s3) -> None:
     s3.put_object(
         Bucket=RESOURCES_BUCKET,
-        Key=f"{ENDPOINTS_PREFIX}/recordings.json",
+        Key=f"{ENDPOINTS_PREFIX}/conversations_flow.json",
         Body=json.dumps(
             {
                 "conversation_recordings": {
-                    "tag": "recordings",
+                    "tag": "conversations",
                     "type": "unitary",
                     "method": "GET",
                     "url": "/api/v2/conversations/{conversationId}/recordings",
@@ -47,9 +47,12 @@ def _add_recordings_flow(s3) -> None:
             }
         ),
     )
-    core = {**CORE_CONFIG, "unitary": [*CORE_CONFIG["unitary"], f"{ENDPOINTS_PREFIX}/recordings.json"]}
+    core = {
+        **CORE_CONFIG,
+        "unitary": [*CORE_CONFIG["unitary"], f"{ENDPOINTS_PREFIX}/conversations_flow.json"],
+    }
     s3.put_object(Bucket=RESOURCES_BUCKET, Key=CORE_CONFIG_KEY, Body=json.dumps(core))
-    add_dispatcher_flow(s3, "recordings")
+    add_dispatcher_flow(s3, "conversations")
 
 
 def test_handler_always_returns_a_list_one_entry_per_tag_and_organization(aws):
@@ -100,12 +103,12 @@ def test_the_payload_file_is_flat_with_no_organization_array(aws):
 def test_tags_produce_a_response_entry_per_tag_and_organization(aws):
     _add_recordings_flow(aws["s3"])
 
-    responses = handler({"tags": ["surveys", "recordings"], "organizations": ORGS}, _context("req-2"))
+    responses = handler({"tags": ["surveys", "conversations"], "organizations": ORGS}, _context("req-2"))
 
     locations = sorted(r["payload_location"] for r in responses)
     assert locations == [
-        f"{PREFIX}/recordings/org-1.json",
-        f"{PREFIX}/recordings/org-3.json",
+        f"{PREFIX}/conversations/org-1.json",
+        f"{PREFIX}/conversations/org-3.json",
         f"{PREFIX}/surveys/org-1.json",
         f"{PREFIX}/surveys/org-3.json",
     ]

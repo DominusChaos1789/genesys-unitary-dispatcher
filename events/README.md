@@ -46,6 +46,9 @@ otherwise the day the run happened.
 | `19-programaciones-mu-list` | funcionarios_programaciones for every management unit downloaded on 2026-08-13 | reads the landing files (never deletes them) | same shape as `17`, one flow (`funcionarios_programaciones`) |
 | `20-unitary-conversations` | surveys for just the conversations listed in a `unitary_process` file | reads that file and the matching conversations_details folder (never deletes) | list with one entry per organization in the file |
 | `21-unitary-csv` | transcripts from a CSV the unitary process left in the output bucket | reads that CSV (never deletes it) | one entry per `Organizacion` in the CSV |
+| `22-transcript-events-fh` | transcript_events from a Firehose delivery file (one JSON record per line, Genesys organization ids mapped to `org-N` by the temporary `config.GENESYS_ORGANIZATIONS`) | reads that file (never deletes it) | one entry per mapped organization: `stages: ["request_url"]` |
+| `23-recordings-csv` | recordings from a CSV (`conversacion_id`, `cliente_prefijo`, `Organizacion`) in the output bucket | reads that CSV (never deletes it) | one entry per `Organizacion`: `stages: ["request_context", "request_url"]` |
+| `24-recordings-by-date` | recordings for every recorded BDO/SAC conversation that started on 2026-11-19 | ⚠️ **runs an Athena query** (billed by data scanned) over the curated sessions table | one entry per organization the query returns |
 | `06-surveys-contracts` | the hourly contracts process, then surveys | ⚠️ **writes parquet to refined and deletes the processed transcription files in providers-landing** | list with one entry per contract's organization; contract counts are in the `Run summary` log line |
 
 Every successful run writes one **flat** file per (tag, organization) pair to a

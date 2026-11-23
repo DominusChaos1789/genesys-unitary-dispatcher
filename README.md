@@ -53,6 +53,7 @@ Current tags:
 | `surveys` | `request_context` | `conversations_surveys_result` (GET `/quality/surveys/{surveyId}`, one call per Finished surveyId, no polling) |
 | `transcripts` | `request_context` → `request_url` | `conversations_participants` (GET `/conversations/{conversationId}`, the conversation itself, sent along with each transcript download), `transcripts_url` (GET `/speechandtextanalytics/conversations/{conversationId}/communications/{communicationId}/transcripturl`, one call per (conversationId, communicationId) pair — see [Payload](#payload)) |
 | `transcript_events` | `request_url` | `transcript_events_url` (the same call as `transcripts_url`; only its ids source differs — real-time events instead of a daily download) |
+| `recordings` | `request_context` → `request_url` | `transacciones_grabaciones` (GET `/conversations/{conversationId}/recordings?formatId=MP3&mediaFormats=MP3&locale=en-US`, lists the conversation's recordings; `result_data: "selfUri"` — the recording id is its last segment, also its `id`), `transacciones_grabaciones_url` (GET `/conversations/{conversationId}/recordings/{recordingId}?formatId=MP3&download=true&locale=en-US&mediaFormats=MP3`, the recording with its MP3 download URL in `mediaUris`; `{recordingId}` is only known once `request_context` responds, so it's left as a placeholder like `{scheduleId}`) |
 | `funcionarios_adherencia` | `request_init` → `request_status` | `adherence_historical_init` (POST, one bulk job per management unit; no `userIds`, so it covers every user in the unit), `adherence_agent_status` |
 | `funcionarios_programaciones` | `request_context` → `request_status` → `request_activity` | `funcionarios_schedules_id` (GET, lists a business unit's week schedule ids), `funcionarios_schedules` (POST, the full agent schedules for one of those), `funcionarios_codigo_actividad` (GET, the business unit's activity code catalog — for identifying shift activities later) |
 
@@ -79,6 +80,7 @@ deploy:
     "surveys":                 {"enabled": true, "domain": "transacciones", "id_kind": "survey"},
     "transcripts":              {"enabled": true, "domain": "transacciones", "id_kind": "transcript_session"},
     "transcript_events":        {"enabled": true, "domain": "transacciones", "id_kind": "transcript_event"},
+    "recordings":               {"enabled": true, "domain": "transacciones", "id_kind": "recording"},
     "funcionarios_adherencia": {"enabled": true, "domain": "funcionarios",  "id_kind": "management_unit"},
     "funcionarios_programaciones": {
       "enabled": true, "domain": "funcionarios", "id_kind": "management_unit_schedule"
@@ -185,6 +187,9 @@ depends on the tag's `id_kind`:
   `conversations_surveys_result` (`/quality/surveys/{surveyId}`), not the
   conversation itself, so Expired/other-status surveys and conversations with
   none are skipped.
+- `"recording"` (recordings) — the conversation's `conversationId`, only
+  for conversations with at least one session whose `recording` is `true`.
+  Not part of `"tags": "all"`: every recorded call of a day is a large download.
 - `"transcript_session"` (transcripts) — one `{conversationId,
   communicationId}` pair per **recorded voice** participant session on the
   conversation (`participants[].sessions[].sessionId` → `communicationId`,
@@ -272,8 +277,49 @@ Rows are grouped by `Organizacion` into `{conversationId, communicationId}`
 pairs and each organization gets its payload as usual; duplicate rows collapse
 and rows missing a value are skipped (counted in `unitary_conversations.skipped_rows`).
 A CSV only carries conversation/communication ids, so it can feed
-`transcripts` (and plain `conversation` tags) but not `surveys`. `cliente_prefijo`
+`transcripts`, `recordings` (and plain `conversation` tags) but not `surveys`. `cliente_prefijo`
 isn't used. A `.csv` key is what selects this; a `.json` key is the format above.
+
+For **recordings** the CSV comes straight off the curated sessions table, with
+`conversacion_id` instead of `conversationId` and no `communicationId` (only
+transcripts needs that column):
+
+```json
+{"tag": "recordings", "ids_source": "unitary_conversations",
+ "ids_location": {"bucket": "output",
+                  "key": "transacciones/genesys/unitary_process/recordings/<file>.csv"}}
+```
+
+```csv
+"conversacion_id","cliente_prefijo","Organizacion"
+"60edfc6c-...","BDO","org-3"
+```
+
+#### recordings by date, from Athena
+
+```json
+{"tag": "recordings", "ids_source": "unitary_conversations", "date": "2026-11-19"}
+{"tag": "recordings", "ids_source": "unitary_conversations", "date": "2026-11-19",
+ "cliente_prefijo": "BDO", "operacion_prefijo": "SAC", "organization_id": "org-3"}
+```
+
+With a `date` and **no file**, the run queries Athena
+(`recorded_conversations.py`) for every recorded conversation
+(`interaccion_grabada = true`) that started that day
+(`conversacion_fecha_inicio`), in `"augusta-nexa-<env>-transacciones-curated"."genesys-conversaciones-sesiones-core"`
+(over `s3://augusta-nexa-<env>-refined/transacciones/curated/genesys-conversaciones-sesiones/core/data/`).
+`cliente_prefijo`, `operacion_prefijo` and `organization_id` are optional
+filters. Each conversation's organization comes from `cliente_prefijo`, the
+same rules as the CSV export query (`bdb` → `org-2`, `bpp`/`bdo` → `org-3`,
+anything else → `org-3`; `ORGANIZATION_RULES`). The table's `year=/month=/day=`
+partitions are the day the data was *processed*, not the conversation's day,
+so the query filters on `conversacion_fecha_inicio` rather than on the
+partitions. Only `recordings` can be fed this way. A failed query (or one
+still running after 10 minutes, which is then stopped) fails the run; the
+query id is in the summary under `unitary_conversations.query_execution_id`.
+The Lambda's role needs `athena:StartQueryExecution`/`GetQueryExecution`/
+`GetQueryResults`/`StopQueryExecution`, `glue:GetTable`/`GetPartitions`, read
+on the refined bucket and write on the workgroup's query results location.
 
 ### Ids from real-time conversation events (`transcript_events`)
 
@@ -296,6 +342,39 @@ and resolves it into the same `{conversationId, communicationId}` pair shape
 `transcript_events_url` endpoint transcripts uses. An event id whose file
 can't be read, or that's missing `conversationId`/`sessionId`, is skipped and
 listed in `transcript_events.skipped_files`; nothing is deleted.
+
+The same events also arrive through **Firehose**, batched into extensionless
+delivery files under
+`augusta-nexa-<env>-landing/transacciones/genesys/events/transcript/year=/month=/day=/`
+— one JSON record per line:
+
+```json
+{"tag": "transcript_events", "organizations": [{"organization_id": "96cd5ccd-1808-419f-9ce4-54691e2aa02e",
+ "ids": [{"conversationId": "d6e10ac1-...", "communicationId": "7da3caac-..."}]}]}
+```
+
+The file's creation triggers
+
+```json
+{"tag": "transcript_events", "ids_source": "unitary_conversations",
+ "ids_location": {"bucket": "landing", "key": "transacciones/genesys/events/transcript/year=2026/month=11/day=23/<firehose file>"}}
+```
+
+Those records already carry the `{conversationId, communicationId}` pairs, so
+no event file is looked up: the pairs are grouped by organization and
+de-duplicated. The records name the **Genesys** organization id, mapped to
+this Lambda's `org-N` by a **temporary hardcoded** table
+(`config.GENESYS_ORGANIZATIONS`):
+
+| Genesys organization id | organization |
+|---|---|
+| `a96b4397-4a1e-44de-bc1e-0365e163eb39` | `org-1` |
+| `432897ee-dad8-4ede-8c64-f489e4c8f8f3` | `org-2` |
+| `96cd5ccd-1808-419f-9ce4-54691e2aa02e` | `org-3` |
+| `956b5c93-38a7-4087-89a3-da3edf40b138` | `org-4` |
+
+An organization not in the table is skipped and listed in
+`unitary_conversations.unknown_organizations`.
 
 ## Payload
 
@@ -525,6 +604,10 @@ All optional.
 | `CONVERSATIONS_EVENTS_PREFIX` | `transacciones/genesys/real_time_tmp_events/transcript_events/` | The folder holding the `org_id=<N>/<event_id>.json` files (no date partitioning). |
 | `MANAGEMENT_UNIT_LIST_BUCKET` | `augusta-nexa-<env>-landing` | `management_unit_list` source: the bucket the Genesys management units download writes to. Logical or full name. |
 | `MANAGEMENT_UNIT_LIST_PREFIX` | `funcionarios/genesys/api/management_unit_list/` | The folder holding the `org_id=<N>/year=/month=/day=` partitions. |
+| `ATHENA_DATABASE` | `augusta-nexa-<env>-transacciones-curated` | recordings by date: the Glue database queried. |
+| `ATHENA_TABLE` | `genesys-conversaciones-sesiones-core` | recordings by date: the curated sessions table. |
+| `ATHENA_WORKGROUP` | `primary` | recordings by date: the Athena workgroup. |
+| `ATHENA_OUTPUT_LOCATION` | *(unset)* | recordings by date: an `s3://` query results location; unset uses the workgroup's own. |
 
 ## Deployment
 

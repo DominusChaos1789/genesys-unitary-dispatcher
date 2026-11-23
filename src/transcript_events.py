@@ -22,12 +22,22 @@ pair transcripts_url needs -- the same shape the batch "transcripts" tag
 download, just sourced one real-time event at a time. An event id whose file
 can't be read, or that's missing conversationId/sessionId, is skipped and
 listed in the summary; nothing is deleted here.
+
+The same events also reach S3 through Firehose, batched into extensionless
+delivery files (one JSON record per line) under
+transacciones/genesys/events/transcript/year=/month=/day=/. An event naming
+one of those files (`"ids_source": "unitary_conversations"` with
+`ids_location`) is read by collect_from_firehose instead: its records carry
+the {conversationId, communicationId} pairs already, keyed by the Genesys
+organization id, mapped to "org-N" through config.GENESYS_ORGANIZATIONS
+(TEMPORARY, hardcoded).
 """
 
 import logging
 
 import src.s3_utils as s3_utils
-from src.config import Settings
+from src.config import GENESYS_ORGANIZATIONS, Settings
+from src.sources import EventError, _group
 
 logger = logging.getLogger(__name__)
 
@@ -88,5 +98,57 @@ def resolve_transcript_events(s3_client, settings: Settings, event_ids_by_organi
             "events_read": events_read,
             "skipped_files": skipped,
             "conversations": {org: len(ids) for org, ids in resolved.items()},
+        },
+    }
+
+
+def organization_alias(genesys_organization_id: str) -> str | None:
+    """A Genesys organization id (as the Firehose records carry it) -> this
+    Lambda's "org-N" -- through the TEMPORARY hardcoded map in config.py. An
+    id already in "org-N" form passes through; anything else is unknown."""
+    if genesys_organization_id in GENESYS_ORGANIZATIONS:
+        return GENESYS_ORGANIZATIONS[genesys_organization_id]
+    if isinstance(genesys_organization_id, str) and genesys_organization_id.startswith("org-"):
+        return genesys_organization_id
+    return None
+
+
+def collect_from_firehose(records, file_key: str = "") -> dict:
+    """A Firehose delivery file of real-time transcript events -- one record
+    per line, each {"tag", "organizations": [{"organization_id": <Genesys
+    organization id>, "ids": [{conversationId, communicationId}, ...]}]} --
+    as {conversationId, communicationId} pairs by organization. Those are the
+    pairs transcripts_url needs already, so there's no event file to look up
+    here. Organizations missing from the map are skipped and listed."""
+    records = records if isinstance(records, list) else [records]
+    organizations = []
+    unknown: set[str] = set()
+    for record in records:
+        if not isinstance(record, dict):
+            raise EventError(f"Firehose record must be an object, got {record!r}")
+        for entry in record.get("organizations") or []:
+            alias = organization_alias((entry or {}).get("organization_id"))
+            if alias is None:
+                unknown.add(str((entry or {}).get("organization_id")))
+                continue
+            ids = [
+                {"conversationId": item["conversationId"], "communicationId": item["communicationId"]}
+                for item in entry.get("ids") or []
+                if isinstance(item, dict) and item.get("conversationId") and item.get("communicationId")
+            ]
+            organizations.append({"organization_id": alias, "ids": ids})
+
+    ids_by_organization = _group(organizations)
+    if unknown:
+        logger.warning(
+            "Firehose file %s: organizations not in the map, skipped: %s", file_key, sorted(unknown)
+        )
+    return {
+        "ids_by_organization": ids_by_organization,
+        "summary": {
+            "file": file_key,
+            "records": len(records),
+            "unknown_organizations": sorted(unknown),
+            "conversations": {org: len(ids) for org, ids in ids_by_organization.items()},
         },
     }

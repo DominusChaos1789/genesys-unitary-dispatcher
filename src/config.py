@@ -30,6 +30,22 @@ DEFAULT_CONVERSATIONS_EVENTS_PREFIX = "transacciones/genesys/real_time_tmp_event
 # Where the Genesys management units download leaves its files, same layout
 # as the conversations download: <prefix>org_id=<N>/year=YYYY/month=MM/day=DD/*.json
 DEFAULT_MANAGEMENT_UNIT_LIST_PREFIX = "funcionarios/genesys/api/management_unit_list/"
+# Recorded conversations by date (recordings): the curated sessions table in
+# Athena, over s3://augusta-nexa-<env>-refined/transacciones/curated/
+# genesys-conversaciones-sesiones/core/data/. The database defaults to
+# augusta-nexa-<env>-transacciones-curated.
+DEFAULT_ATHENA_TABLE = "genesys-conversaciones-sesiones-core"
+DEFAULT_ATHENA_WORKGROUP = "primary"
+
+# TEMPORARY: Genesys organization ids (as the real-time firehose files carry
+# them) -> this Lambda's organization ids ("org-N", the org_id=N folders and
+# the `servers` SSM entries). Hardcoded until the mapping lives in config.
+GENESYS_ORGANIZATIONS = {
+    "a96b4397-4a1e-44de-bc1e-0365e163eb39": "org-1",
+    "432897ee-dad8-4ede-8c64-f489e4c8f8f3": "org-2",
+    "96cd5ccd-1808-419f-9ce4-54691e2aa02e": "org-3",
+    "956b5c93-38a7-4087-89a3-da3edf40b138": "org-4",
+}
 
 
 def normalize_env_token(value: str) -> str:
@@ -89,6 +105,13 @@ class Settings:
     # and prefix the Genesys management units download writes to.
     management_unit_list_bucket: str
     management_unit_list_prefix: str
+    # recordings by date (ids_source "unitary_conversations" + `date`, no
+    # file): the Athena database/table/workgroup queried for recorded
+    # conversations; an empty output location uses the workgroup's own.
+    athena_database: str = ""
+    athena_table: str = DEFAULT_ATHENA_TABLE
+    athena_workgroup: str = DEFAULT_ATHENA_WORKGROUP
+    athena_output_location: str = ""
 
     def resolve_bucket(self, name: str) -> str:
         """ "landing" -> "augusta-nexa-dev-landing"; full names pass through."""
@@ -135,4 +158,8 @@ def load_settings() -> Settings:
         management_unit_list_prefix=os.environ.get(
             "MANAGEMENT_UNIT_LIST_PREFIX", DEFAULT_MANAGEMENT_UNIT_LIST_PREFIX
         ),
+        athena_database=os.environ.get("ATHENA_DATABASE", f"{stack}-transacciones-curated"),
+        athena_table=os.environ.get("ATHENA_TABLE", DEFAULT_ATHENA_TABLE),
+        athena_workgroup=os.environ.get("ATHENA_WORKGROUP", DEFAULT_ATHENA_WORKGROUP),
+        athena_output_location=os.environ.get("ATHENA_OUTPUT_LOCATION", ""),
     )

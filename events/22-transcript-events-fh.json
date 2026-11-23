@@ -1,0 +1,8 @@
+{
+  "tag": "transcript_events",
+  "ids_source": "unitary_conversations",
+  "ids_location": {
+    "bucket": "landing",
+    "key": "transacciones/genesys/events/transcript/year=2026/month=11/day=23/augusta-nexa-dev-firehose-genesys-transcript-events-2-2026-11-23-00-01-58-75cb5d15-3fce-4a00-934b-48b1a5bb5871"
+  }
+}

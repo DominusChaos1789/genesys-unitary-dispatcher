@@ -28,7 +28,7 @@ TWO_ORGS = [
 ]
 RECORDINGS_ENDPOINT = {
     "conversation_recordings": {
-        "tag": "recordings",
+        "tag": "conversations",
         "url": "/api/v2/conversations/{conversationId}/recordings",
         "type": "unitary",
         "method": "GET",
@@ -47,14 +47,17 @@ def _add_recordings_flow(s3) -> None:
     dispatcher.json entry."""
     s3.put_object(
         Bucket=RESOURCES_BUCKET,
-        Key="params/genesys/api/recordings.json",
+        Key="params/genesys/api/conversations_flow.json",
         Body=json.dumps(RECORDINGS_ENDPOINT),
     )
     from test.conftest import CORE_CONFIG, CORE_CONFIG_KEY, ENDPOINTS_PREFIX
 
-    core = {**CORE_CONFIG, "unitary": [*CORE_CONFIG["unitary"], f"{ENDPOINTS_PREFIX}/recordings.json"]}
+    core = {
+        **CORE_CONFIG,
+        "unitary": [*CORE_CONFIG["unitary"], f"{ENDPOINTS_PREFIX}/conversations_flow.json"],
+    }
     s3.put_object(Bucket=RESOURCES_BUCKET, Key=CORE_CONFIG_KEY, Body=json.dumps(core))
-    add_dispatcher_flow(s3, "recordings")
+    add_dispatcher_flow(s3, "conversations")
 
 
 def test_surveys_writes_one_flat_file_per_organization(aws, genesys_api):
@@ -318,18 +321,18 @@ def test_payloads_for_different_tags_do_not_overwrite_each_other(aws):
 def test_several_tags_share_the_ids_and_one_token_per_organization(aws, genesys_api):
     _add_recordings_flow(aws["s3"])
 
-    result = run({"tags": ["surveys", "recordings"], "organizations": TWO_ORGS}, _context("req-multi"))
+    result = run({"tags": ["surveys", "conversations"], "organizations": TWO_ORGS}, _context("req-multi"))
 
-    assert result["tags"] == ["surveys", "recordings"]
+    assert result["tags"] == ["surveys", "conversations"]
     locations = sorted(r["payload_location"] for r in result["responses"])
     assert locations == [
-        f"{PAYLOAD_PREFIX}/recordings/org-1.json",
-        f"{PAYLOAD_PREFIX}/recordings/org-3.json",
+        f"{PAYLOAD_PREFIX}/conversations/org-1.json",
+        f"{PAYLOAD_PREFIX}/conversations/org-3.json",
         f"{PAYLOAD_PREFIX}/surveys/org-1.json",
         f"{PAYLOAD_PREFIX}/surveys/org-3.json",
     ]
     surveys = payload_by_org(result, "surveys")["org-3"]
-    recordings = payload_by_org(result, "recordings")["org-3"]
+    recordings = payload_by_org(result, "conversations")["org-3"]
     assert surveys["request_context"]["url"] == "/api/v2/quality/surveys/{surveyId}"
     assert recordings["request_context"]["url"] == "/api/v2/conversations/{conversationId}/recordings"
     assert recordings["ids"] == surveys["ids"] == ["conv-3a", "conv-3b"]
@@ -357,7 +360,7 @@ def test_all_tags_runs_every_conversation_flow_and_nothing_else(aws):
     result = run({"tags": "all", "organizations": TWO_ORGS}, _context())
 
     # funcionarios_adherencia takes management-unit ids, not conversation ids.
-    assert result["tags"] == ["recordings", "surveys", "transcripts"]
+    assert result["tags"] == ["conversations", "surveys", "transcripts"]
 
 
 def test_all_tags_without_any_conversation_flow_is_an_error(aws):
@@ -461,15 +464,15 @@ def test_a_failing_organization_gets_no_file_in_any_tag(aws, monkeypatch):
 
     monkeypatch.setattr("src.main.get_token", flaky_get_token)
 
-    result = run({"tags": ["surveys", "recordings"], "organizations": TWO_ORGS}, _context())
+    result = run({"tags": ["surveys", "conversations"], "organizations": TWO_ORGS}, _context())
 
-    # surveys ("survey" id_kind) and recordings ("conversation" id_kind) each
+    # surveys ("survey" id_kind) and conversations ("conversation" id_kind) each
     # draw their own copy of org-1's inline id, so the combined failure list
     # (across kinds, not deduplicated) counts it twice.
     assert result["failed_organizations"] == [
         {"organization_id": "org-1", "id_count": 2, "error": "oauth down for org-1"}
     ]
-    for tag in ("surveys", "recordings"):
+    for tag in ("surveys", "conversations"):
         by_org = payload_by_org(result, tag)
         assert list(by_org) == ["org-3"]
         assert by_org["org-3"]["failed_organizations"] == [

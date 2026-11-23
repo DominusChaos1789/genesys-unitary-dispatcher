@@ -241,7 +241,7 @@ def test_a_csv_cannot_feed_surveys(output_bucket):
 def test_a_csv_without_the_expected_columns_is_rejected(output_bucket):
     _put_csv(output_bucket, "c1,P1", header="conversationId,communicationId\n")
 
-    with pytest.raises(EventError, match="needs the columns"):
+    with pytest.raises(EventError, match="needs a conversation id column"):
         run(CSV_EVENT, _context())
 
 

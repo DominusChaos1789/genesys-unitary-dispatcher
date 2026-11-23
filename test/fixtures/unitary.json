@@ -77,6 +77,22 @@
         },
         "result_data": "state"
     },
+    "transacciones_grabaciones": {
+        "tag": "recordings",
+        "url": "/api/v2/conversations/{conversationId}/recordings?formatId=MP3&mediaFormats=MP3&locale=en-US",
+        "type": "unitary",
+        "method": "GET",
+        "path": "recordings",
+        "result_data": "selfUri"
+    },
+    "transacciones_grabaciones_url": {
+        "tag": "recordings",
+        "url": "/api/v2/conversations/{conversationId}/recordings/{recordingId}?formatId=MP3&download=true&locale=en-US&mediaFormats=MP3",
+        "type": "url",
+        "method": "GET",
+        "path": "recordings",
+        "result_data": "mediaUris"
+    },
     "funcionarios_codigo_actividad": {
         "tag": "funcionarios_programaciones",
         "url": "/api/v2/workforcemanagement/businessunits/{businessUnitId}/activitycodes",

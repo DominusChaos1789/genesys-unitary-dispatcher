@@ -80,18 +80,45 @@ def _sort_key(item):
     return item if isinstance(item, str) else json.dumps(item, sort_keys=True)
 
 
+def has_ids_location(event: dict) -> bool:
+    """Whether the event points at a file (`ids_location` or an S3 event's `detail`)."""
+    return _ids_location(event) is not None
+
+
+def parse_json_documents(text: str):
+    """One JSON document, or -- for Firehose delivery files, which have no
+    extension and hold one record per line (or records back to back with no
+    separator at all) -- the list of every record in the file."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    decoder = json.JSONDecoder()
+    records = []
+    position = 0
+    while True:
+        while position < len(text) and text[position].isspace():
+            position += 1
+        if position >= len(text):
+            return records
+        record, position = decoder.raw_decode(text, position)
+        records.append(record)
+
+
 def read_ids_document(s3_client, settings: Settings, event: dict):
-    """The JSON file the event points at (`ids_location`, or an S3 "Object
+    """The file the event points at (`ids_location`, or an S3 "Object
     Created" event's `detail`), for ids sources whose file isn't the plain
-    organizations list."""
+    organizations list: a CSV (as rows), a JSON document, or a Firehose file
+    of JSON records (as a list of them)."""
     location = _ids_location(event)
     if location is None:
         raise EventError("Event carries no file: expected 'ids_location' or an S3 event 'detail'")
     bucket, key = location
     bucket = settings.resolve_bucket(bucket)
+    text = s3_utils.read_text(s3_client, bucket, key)
     if key.lower().endswith(".csv"):
-        return list(csv.DictReader(io.StringIO(s3_utils.read_text(s3_client, bucket, key)))), key
-    return s3_utils.read_json(s3_client, bucket, key), key
+        return list(csv.DictReader(io.StringIO(text))), key
+    return parse_json_documents(text), key
 
 
 def _group(organizations) -> dict[str, list]:

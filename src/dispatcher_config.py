@@ -16,6 +16,9 @@ kind of id feeds it):
   one event id at a time from the real-time conversation-event process
   instead of a whole day's conversations_details download
   (transcript_events).
+- "recording": conversation ids of recorded conversations only
+  (recordings) -- its endpoints list a conversation's recordings and then
+  fetch each one's download URL.
 - "management_unit": a management unit's own id (funcionarios_adherencia).
 - "management_unit_schedule": {managementUnitId, businessUnitId} pairs, one
   per management unit (funcionarios_programaciones) -- its schedule endpoints
@@ -67,6 +70,9 @@ TRANSCRIPT_SESSION_ID_KIND = "transcript_session"
 TRANSCRIPT_EVENT_ID_KIND = "transcript_event"
 MANAGEMENT_UNIT_ID_KIND = "management_unit"
 MANAGEMENT_UNIT_SCHEDULE_ID_KIND = "management_unit_schedule"
+# Conversation ids, but only of recorded conversations (recordings) -- kept out
+# of `"tags": "all"`: every recorded call of a day is a large download.
+RECORDING_ID_KIND = "recording"
 CONVERSATION_DETAILS_ID_KINDS = (CONVERSATION_ID_KIND, SURVEY_ID_KIND, TRANSCRIPT_SESSION_ID_KIND)
 
 

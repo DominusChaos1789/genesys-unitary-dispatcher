@@ -10,8 +10,10 @@ from types import SimpleNamespace
 
 import pytest
 
+import src.recorded_conversations as recorded_conversations
 from src.main import handler
 from test.conftest import LANDING_BUCKET, LOGS_BUCKET, load_fixture
+from test.test_recordings import FakeAthena
 
 EVENTS_DIR = Path(__file__).resolve().parent.parent / "events"
 CONVERSATIONS_DETAILS_KEY = (
@@ -26,6 +28,14 @@ TRANSCRIPT_EVENT_KEY = (
 UNITARY_PROCESS_KEY = "transacciones/genesys/unitary_process/request-1.json"
 UNITARY_CSV_KEY = "transacciones/genesys/unitary_process/transcripts/4d16aedd-20ab-4750-a6bb-b726f4181462.csv"
 OUTPUT_BUCKET = "augusta-nexa-dev-output"
+FIREHOSE_KEY = (
+    "transacciones/genesys/events/transcript/year=2026/month=11/day=23/"
+    "augusta-nexa-dev-firehose-genesys-transcript-events-2-2026-11-23-00-01-58-"
+    "75cb5d15-3fce-4a00-934b-48b1a5bb5871"
+)
+RECORDINGS_CSV_KEY = (
+    "transacciones/genesys/unitary_process/recordings/4d16aedd-20ab-4750-a6bb-b726f4181462.csv"
+)
 MANAGEMENT_UNIT_LIST_KEY = (
     "funcionarios/genesys/api/management_unit_list/org_id=1/year=2026/month=08/day=13/units.json"
 )
@@ -50,6 +60,10 @@ SUCCEEDS = {
     "19-programaciones-mu-list.json": {("funcionarios_programaciones", "org-1"): 2},
     "20-unitary-conversations.json": {("surveys", "org-1"): 1},
     "21-unitary-csv.json": {("transcripts", "org-1"): 2, ("transcripts", "org-3"): 1},
+    "22-transcript-events-fh.json": {("transcript_events", "org-3"): 2, ("transcript_events", "org-1"): 1},
+    "23-recordings-csv.json": {("recordings", "org-3"): 2},
+    # Athena is faked below: two recorded BDO conversations.
+    "24-recordings-by-date.json": {("recordings", "org-3"): 2},
 }
 # event file -> error message the run must fail with
 FAILS = {
@@ -130,7 +144,48 @@ def seeded_landing(aws, seeded_source_files):
             ]
         ).encode("utf-8"),
     )
+    firehose_records = [
+        ("96cd5ccd-1808-419f-9ce4-54691e2aa02e", "conv-a", "comm-a1"),
+        ("96cd5ccd-1808-419f-9ce4-54691e2aa02e", "conv-a", "comm-a2"),
+        ("a96b4397-4a1e-44de-bc1e-0365e163eb39", "conv-b", "comm-b1"),
+    ]
+    s3.put_object(
+        Bucket=LANDING_BUCKET,
+        Key=FIREHOSE_KEY,
+        Body="".join(
+            json.dumps(
+                {
+                    "tag": "transcript_events",
+                    "organizations": [
+                        {"organization_id": org, "ids": [{"conversationId": c, "communicationId": m}]}
+                    ],
+                }
+            )
+            + "\n"
+            for org, c, m in firehose_records
+        ).encode("utf-8"),
+    )
+    s3.put_object(
+        Bucket=OUTPUT_BUCKET,
+        Key=RECORDINGS_CSV_KEY,
+        Body="\n".join(
+            [
+                '"conversacion_id","cliente_prefijo","Organizacion"',
+                '"r1","BDO","org-3"',
+                '"r1","BDO","org-3"',
+                '"r2","BDO","org-3"',
+            ]
+        ).encode("utf-8"),
+    )
     return s3
+
+
+@pytest.fixture(autouse=True)
+def fake_athena(monkeypatch):
+    client = FakeAthena([("r1", "org-3"), ("r2", "org-3")])
+    monkeypatch.setattr(recorded_conversations, "_athena_client", lambda settings: client)
+    monkeypatch.setattr(recorded_conversations.time, "sleep", lambda seconds: None)
+    return client
 
 
 def test_every_event_file_has_an_expectation():

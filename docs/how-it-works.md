@@ -197,6 +197,15 @@ steps 1-2, both S3 edits.
 | Saved under | `transacciones/genesys/api` |
 | Next | Same as `transcripts`: Download calls the template once per pair. |
 
+### `recordings`
+
+| | |
+|---|---|
+| Ids | conversation ids of **recorded** conversations (`id_kind: "recording"`) -- from a CSV (`conversacion_id`, `Organizacion`), from Athena by `date` (curated sessions table, `interaccion_grabada = true`), or from conversations_details / the unitary JSON file (conversations with a `recording: true` session) |
+| Stages | `request_context`: `GET /api/v2/conversations/{conversationId}/recordings?formatId=MP3&mediaFormats=MP3&locale=en-US` (`transacciones_grabaciones`, `result_data: "selfUri"`) → `request_url`: `GET .../conversations/{conversationId}/recordings/{recordingId}?formatId=MP3&download=true&locale=en-US&mediaFormats=MP3` (`transacciones_grabaciones_url`) |
+| Saved under | `transacciones/genesys/api` |
+| Next | Download lists each conversation's recordings, takes each one's recording id (the last segment of `selfUri`, same as its `id`) for `{recordingId}`, and fetches the MP3 from `mediaUris.*.mediaUri`. |
+
 ### Contracts process: where surveys ids come from
 
 The hourly schedule sends `{"tag": "surveys", "ids_source": "contracts"}`. Before
@@ -262,7 +271,18 @@ If the file is a `.csv` instead (output bucket; columns `conversationId,
 communicationId, cliente_prefijo, Organizacion`), `conversations_details.collect_from_csv`
 groups its rows by `Organizacion` into `{conversationId, communicationId}`
 pairs -- no conversations_details lookup -- for `transcripts` or plain
-conversation tags (not `surveys`).
+conversation tags (not `surveys`). For `recordings` the conversation column is
+`conversacion_id` and there's no `communicationId`: the rows become plain
+conversation ids.
+
+With a `date` and no file (`{"tag": "recordings", "ids_source":
+"unitary_conversations", "date": "2026-11-19"}`, optionally with
+`cliente_prefijo`/`operacion_prefijo`/`organization_id`),
+`recorded_conversations.collect_recorded_conversations` runs one Athena query
+over the curated sessions table for that day's recorded conversations, maps
+`cliente_prefijo` to an organization (`ORGANIZATION_RULES`), and waits for it
+(`start_query_execution` → `get_query_execution` until SUCCEEDED → paged
+`get_query_results`). Only `recordings` can be fed this way.
 
 ### Real-time conversation events: ids for `transcript_events`
 
@@ -284,6 +304,15 @@ flowchart LR
 | Build the file key from the org and event id | `transcript_events._event_key` |
 | Read each event id's file; skip unreadable ones or ones missing conversationId/sessionId | `transcript_events.resolve_transcript_events` |
 | Extract the pair | `transcript_events._conversation_session_pair` |
+
+The same events also arrive as Firehose delivery files (no extension, one JSON
+record per line) under `landing/transacciones/genesys/events/transcript/year=/month=/day=/`;
+an event naming one (`"ids_source": "unitary_conversations"` + `ids_location`)
+skips the event-file lookup above -- the records carry the pairs already.
+`sources.parse_json_documents` reads the records, and
+`transcript_events.collect_from_firehose` maps each record's Genesys
+organization id to `org-N` through the **temporary** hardcoded
+`config.GENESYS_ORGANIZATIONS` (unknown ones are skipped and listed).
 
 Not part of `"tags": "all"` -- see [dispatcher.json](#3-how-a-flow-is-defined).
 
@@ -430,7 +459,8 @@ them. Problems specific to one organization only affect that organization.
 | [src/landing_partitions.py](../src/landing_partitions.py) | shared `org_id=`/date-partitioned file walk used by conversations_details.py and management_units.py |
 | [src/conversations_details.py](../src/conversations_details.py) | ids from the Genesys conversations download: surveyIds/`{conversationId, communicationId}` pairs/conversationId |
 | [src/management_units.py](../src/management_units.py) | ids from the Genesys management units download (`management_unit_list`): each record's `id`, or its `{id, businessUnit.id}` pair |
-| [src/transcript_events.py](../src/transcript_events.py) | resolves `transcript_events`' event ids into `{conversationId, communicationId}` pairs, one real-time event file at a time |
+| [src/transcript_events.py](../src/transcript_events.py) | resolves `transcript_events`' event ids into `{conversationId, communicationId}` pairs, one real-time event file at a time; or reads them straight off a Firehose delivery file |
+| [src/recorded_conversations.py](../src/recorded_conversations.py) | recordings by date: the Athena query for a day's recorded conversations, grouped by organization |
 | [src/contract.py](../src/contract.py) | the contract model; contract discovery and loading |
 | [src/transform.py](../src/transform.py) | source record → business row: rename, cast, transformations, dedup |
 | [src/technical_columns.py](../src/technical_columns.py) | technical columns engine; `output_core` / `output_atts` rows |
