@@ -1,0 +1,8 @@
+{
+  "tags": ["funcionarios_pronosticos", "funcionarios_grupos_planificacion"],
+  "ids_source": "management_unit_list",
+  "ids_location": {
+    "bucket": "augusta-nexa-dev-landing",
+    "key": "funcionarios/genesys/api/management_unit_list/org_id=1/year=2026/month=08/day=13/units.json"
+  }
+}

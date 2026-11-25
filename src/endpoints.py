@@ -60,6 +60,10 @@ STAGE_BY_NAME = {
     "funcionarios_schedules_id": "request_context",
     "funcionarios_schedules": "request_status",
     "funcionarios_codigo_actividad": "request_activity",
+    # funcionarios_pronosticos: the week's forecast list (request_context, by
+    # its "unitary" type) then one forecast's data, which needs {forecastId}
+    # from that list -- left as a placeholder like {scheduleId}.
+    "funcionarios_pronosticos_data": "request_status",
 }
 
 

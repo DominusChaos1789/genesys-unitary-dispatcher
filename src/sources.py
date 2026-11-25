@@ -19,6 +19,7 @@ organizations list, bare or as {"organizations": [...]}.
 import csv
 import io
 import json
+import re
 
 import src.s3_utils as s3_utils
 from src.config import Settings
@@ -78,6 +79,24 @@ def _sort_key(item):
     are {conversationId, communicationId} objects -- not hashable or
     orderable on their own, so dicts sort by their JSON form instead."""
     return item if isinstance(item, str) else json.dumps(item, sort_keys=True)
+
+
+def event_file_location(event: dict) -> tuple[str, str] | None:
+    """(bucket, key) of the file the event names -- `ids_location`, or an S3
+    "Object Created" event's `detail` -- or None."""
+    return _ids_location(event)
+
+
+_DAY_IN_KEY = re.compile(r"year=(\d{4})/month=(\d{1,2})/day=(\d{1,2})/")
+
+
+def date_from_key(key: str) -> str | None:
+    """ ".../year=2026/month=8/day=13/file.json" -> "2026-08-13"; None if absent."""
+    match = _DAY_IN_KEY.search(key)
+    if not match:
+        return None
+    year, month, day = (int(part) for part in match.groups())
+    return f"{year:04d}-{month:02d}-{day:02d}"
 
 
 def has_ids_location(event: dict) -> bool:

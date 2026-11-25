@@ -20,6 +20,9 @@ kind of id feeds it):
   (recordings) -- its endpoints list a conversation's recordings and then
   fetch each one's download URL.
 - "management_unit": a management unit's own id (funcionarios_adherencia).
+- "business_unit": a business unit's own id, read off the management units
+  download and de-duplicated (funcionarios_pronosticos,
+  funcionarios_grupos_planificacion).
 - "management_unit_schedule": {managementUnitId, businessUnitId} pairs, one
   per management unit (funcionarios_programaciones) -- its schedule endpoints
   need both ids, read off the same management units download as
@@ -73,6 +76,9 @@ MANAGEMENT_UNIT_SCHEDULE_ID_KIND = "management_unit_schedule"
 # Conversation ids, but only of recorded conversations (recordings) -- kept out
 # of `"tags": "all"`: every recorded call of a day is a large download.
 RECORDING_ID_KIND = "recording"
+# A business unit's own id, once per business unit however many management
+# units share it (funcionarios_pronosticos, funcionarios_grupos_planificacion).
+BUSINESS_UNIT_ID_KIND = "business_unit"
 CONVERSATION_DETAILS_ID_KINDS = (CONVERSATION_ID_KIND, SURVEY_ID_KIND, TRANSCRIPT_SESSION_ID_KIND)
 
 

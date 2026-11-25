@@ -1,0 +1,8 @@
+{
+  "source": ["aws.s3"],
+  "detail-type": ["Object Created"],
+  "detail": {
+    "bucket": {"name": ["augusta-nexa-dev-landing"]},
+    "object": {"key": [{"wildcard": "funcionarios/genesys/api/management_unit_list/org_id=*/*.json"}]}
+  }
+}

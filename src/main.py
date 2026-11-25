@@ -16,6 +16,11 @@ every stage of that flow (payload.py):
     funcionarios_programaciones -> request_context, request_status,
                                     request_activity (one {managementUnitId,
                                     businessUnitId} pair per management unit)
+    funcionarios_pronosticos    -> request_context (the week's forecasts),
+                                    request_status (one forecast's data),
+                                    one per business unit
+    funcionarios_grupos_planificacion -> request_context (planning groups),
+                                    one per business unit
 
 `"tags": [...]` runs several flows over their own ids, and `"tags": "all"` runs
 every enabled flow whose dispatcher.json id_kind is "conversation", "survey"
@@ -40,9 +45,11 @@ Ids sources:
   folder, same layout as conversations_details (management_units.py) --
   each management unit's own id (funcionarios_adherencia), or
   {managementUnitId, businessUnitId} pairs (funcionarios_programaciones),
-  depending on the tag's id_kind. For funcionarios_adherencia, as an
-  alternative to `ids_location`/an S3 event when the units aren't already
-  grouped by organization in one file.
+  depending on the tag's id_kind, or the distinct business unit ids
+  (funcionarios_pronosticos, funcionarios_grupos_planificacion). With
+  `ids_location`/an S3 event instead of a `date`, only that one file is
+  read, for the organization of its org_id= folder -- what the EventBridge
+  rule in docs/eventbridge/ sends when the download writes a file.
 
 - "unitary_conversations" (CSV): the unitary process can instead leave a CSV
   (conversationId, communicationId, cliente_prefijo, Organizacion) in the
@@ -116,7 +123,6 @@ from src.conversations_details import (
     unitary_requests,
 )
 from src.dispatcher_config import (
-    MANAGEMENT_UNIT_SCHEDULE_ID_KIND,
     RECORDING_ID_KIND,
     SURVEY_ID_KIND,
     TRANSCRIPT_EVENT_ID_KIND,
@@ -128,11 +134,13 @@ from src.dispatcher_config import (
     output_base_path_key,
 )
 from src.endpoints import load_endpoint_catalog, select_stages
-from src.management_units import collect_management_unit_business_unit_pairs, collect_management_unit_ids
+from src.management_units import collect_for_id_kind, collect_from_file
 from src.payload import build_organization_entry, build_organization_payload, output_base_path
 from src.sources import (
     ALL_TAGS,
     EventError,
+    date_from_key,
+    event_file_location,
     has_ids_location,
     read_ids_document,
     resolve_ids_by_organization,
@@ -204,6 +212,18 @@ def _unitary_conversations(s3_client, settings: Settings, event: dict, id_kind: 
     return collect_for_conversations(s3_client, settings, id_kind, unitary_requests(document))
 
 
+def _management_unit_list(s3_client, settings: Settings, event: dict, id_kind: str) -> dict:
+    """The management units download: the one file the event names (the S3
+    event EventBridge sends when the download writes it, or `ids_location`),
+    or else every organization's files for the event's `date`."""
+    location = event_file_location(event)
+    if location is not None:
+        bucket, key = location
+        return collect_from_file(s3_client, settings, bucket, key, id_kind)
+    day = parse_date(event.get("date"), MANAGEMENT_UNIT_LIST_IDS_SOURCE)
+    return collect_for_id_kind(s3_client, settings, day, id_kind)
+
+
 def _resolve_ids(s3_client, settings: Settings, event: dict, execution_id: str, id_kind: str):
     """(ids by organization, source summary or None, summary key or None).
 
@@ -245,11 +265,7 @@ def _resolve_ids(s3_client, settings: Settings, event: dict, execution_id: str, 
             ids_source,
         )
     elif ids_source == MANAGEMENT_UNIT_LIST_IDS_SOURCE:
-        day = parse_date(event.get("date"), ids_source)
-        if id_kind == MANAGEMENT_UNIT_SCHEDULE_ID_KIND:
-            outcome = collect_management_unit_business_unit_pairs(s3_client, settings, day)
-        else:
-            outcome = collect_management_unit_ids(s3_client, settings, day)
+        outcome = _management_unit_list(s3_client, settings, event, id_kind)
         ids_by_organization, summary, summary_key = (
             outcome["ids_by_organization"],
             outcome["summary"],
@@ -453,7 +469,14 @@ def run(event, context, *, today: date_ | None = None) -> dict:
     settings = load_settings()
     s3_client = boto3.client("s3")
     execution_id = getattr(context, "aws_request_id", None) or str(uuid.uuid4())
-    run_date = event.get("date") or (today or date_.today()).isoformat()
+    # The event's own date, else the day folder of the file it names (an S3
+    # event carries no date of its own), else today.
+    location = event_file_location(event)
+    run_date = (
+        event.get("date")
+        or (date_from_key(location[1]) if location else None)
+        or (today or date_.today()).isoformat()
+    )
 
     selection = resolve_tag_selection(event)
     catalog = load_endpoint_catalog(s3_client, settings)

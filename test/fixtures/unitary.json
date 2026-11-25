@@ -100,5 +100,29 @@
         "method": "GET",
         "path": "activity_codes",
         "result_data": "id"
+    },
+    "funcionarios_pronosticos": {
+        "tag": "funcionarios_pronosticos",
+        "url": "/api/v2/workforcemanagement/businessunits/{businessUnitId}/weeks/{weekDateId}/shorttermforecasts",
+        "type": "unitary",
+        "method": "GET",
+        "path": "forecasts",
+        "result_data": "id"
+    },
+    "funcionarios_pronosticos_data": {
+        "tag": "funcionarios_pronosticos",
+        "url": "/api/v2/workforcemanagement/businessunits/{businessUnitId}/weeks/{weekDateId}/shorttermforecasts/{forecastId}/data",
+        "type": "unitary",
+        "method": "GET",
+        "path": "forecasts",
+        "result_data": "result"
+    },
+    "funcionarios_grupos_planificacion": {
+        "tag": "funcionarios_grupos_planificacion",
+        "url": "/api/v2/workforcemanagement/businessunits/{businessUnitId}/planninggroups",
+        "type": "unitary",
+        "method": "GET",
+        "path": "planning_groups",
+        "result_data": "entities"
     }
 }

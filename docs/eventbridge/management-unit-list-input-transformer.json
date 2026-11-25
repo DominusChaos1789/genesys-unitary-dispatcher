@@ -1,0 +1,7 @@
+{
+  "InputPathsMap": {
+    "bucket": "$.detail.bucket.name",
+    "key": "$.detail.object.key"
+  },
+  "InputTemplate": "{\"tags\": [\"funcionarios_pronosticos\", \"funcionarios_grupos_planificacion\"], \"ids_source\": \"management_unit_list\", \"ids_location\": {\"bucket\": <bucket>, \"key\": <key>}}"
+}

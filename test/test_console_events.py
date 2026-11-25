@@ -64,6 +64,13 @@ SUCCEEDS = {
     "23-recordings-csv.json": {("recordings", "org-3"): 2},
     # Athena is faked below: two recorded BDO conversations.
     "24-recordings-by-date.json": {("recordings", "org-3"): 2},
+    # What the EventBridge rule sends when the management units download lands
+    # (docs/eventbridge/): one call per business unit, two flows.
+    "25-forecast-s3-event.json": {
+        ("funcionarios_pronosticos", "org-1"): 2,
+        ("funcionarios_grupos_planificacion", "org-1"): 2,
+    },
+    "26-planning-mu-list.json": {("funcionarios_grupos_planificacion", "org-1"): 2},
 }
 # event file -> error message the run must fail with
 FAILS = {
