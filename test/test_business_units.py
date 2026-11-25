@@ -75,7 +75,7 @@ def test_forecasts_list_then_fetch_one_forecasts_data(aws):
 
     payload = payload_by_org(result)["org-3"]
     assert payload["request_context"]["url"] == f"{BU}/weeks/{{weekDateId}}/shorttermforecasts"
-    assert payload["request_context"]["result_data"] == "id"
+    assert payload["request_context"]["result_data"] == "selfUri"
     assert (
         payload["request_status"]["url"]
         == f"{BU}/weeks/{{weekDateId}}/shorttermforecasts/{{forecastId}}/data"

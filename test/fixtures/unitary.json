@@ -107,7 +107,7 @@
         "type": "unitary",
         "method": "GET",
         "path": "forecasts",
-        "result_data": "id"
+        "result_data": "selfUri"
     },
     "transacciones_pronosticos_data": {
         "tag": "transacciones_pronosticos",
