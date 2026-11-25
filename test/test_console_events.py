@@ -67,7 +67,7 @@ SUCCEEDS = {
     # What the EventBridge rule sends when the management units download lands
     # (docs/eventbridge/): one call per business unit, two flows.
     "25-forecast-s3-event.json": {
-        ("funcionarios_pronosticos", "org-1"): 2,
+        ("transacciones_pronosticos", "org-1"): 2,
         ("funcionarios_grupos_planificacion", "org-1"): 2,
     },
     "26-planning-mu-list.json": {("funcionarios_grupos_planificacion", "org-1"): 2},

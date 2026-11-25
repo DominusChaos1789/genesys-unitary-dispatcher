@@ -10,7 +10,7 @@ this rule starts the Step Function that calls Request Unitary with
 
 ```json
 {
-  "tags": ["funcionarios_pronosticos", "funcionarios_grupos_planificacion"],
+  "tags": ["transacciones_pronosticos", "funcionarios_grupos_planificacion"],
   "ids_source": "management_unit_list",
   "ids_location": {
     "bucket": "augusta-nexa-dev-landing",

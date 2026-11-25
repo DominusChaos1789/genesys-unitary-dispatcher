@@ -45,7 +45,7 @@ above):
 | `funcionarios_schedules_id` | `request_context` | lists a business unit's week schedule ids |
 | `funcionarios_schedules` | `request_status` | the full agent schedules for one of those (needs `{scheduleId}`, only known once `request_context` responds, so it's left as a placeholder same as `{communicationId}`) |
 | `funcionarios_codigo_actividad` | `request_activity` | a business unit's activity code catalog |
-| `funcionarios_pronosticos_data` | `request_status` | one short-term forecast's data (needs `{forecastId}`, only known once `request_context`, the week's forecast list, responds) |
+| `transacciones_pronosticos_data` | `request_status` | one short-term forecast's data (needs `{forecastId}`, only known once `request_context`, the week's forecast list, responds) |
 
 Current tags:
 
@@ -56,7 +56,7 @@ Current tags:
 | `transcript_events` | `request_url` | `transcript_events_url` (the same call as `transcripts_url`; only its ids source differs — real-time events instead of a daily download) |
 | `recordings` | `request_context` → `request_url` | `transacciones_grabaciones` (GET `/conversations/{conversationId}/recordings?formatId=MP3&mediaFormats=MP3&locale=en-US`, lists the conversation's recordings; `result_data: "selfUri"` — the recording id is its last segment, also its `id`), `transacciones_grabaciones_url` (GET `/conversations/{conversationId}/recordings/{recordingId}?formatId=MP3&download=true&locale=en-US&mediaFormats=MP3`, the recording with its MP3 download URL in `mediaUris`; `{recordingId}` is only known once `request_context` responds, so it's left as a placeholder like `{scheduleId}`) |
 | `funcionarios_adherencia` | `request_init` → `request_status` | `adherence_historical_init` (POST, one bulk job per management unit; no `userIds`, so it covers every user in the unit), `adherence_agent_status` |
-| `funcionarios_pronosticos` | `request_context` → `request_status` | `funcionarios_pronosticos` (GET `/workforcemanagement/businessunits/{businessUnitId}/weeks/{weekDateId}/shorttermforecasts`, the week's short-term forecasts; `result_data: "id"` → `{forecastId}`), `funcionarios_pronosticos_data` (GET `.../shorttermforecasts/{forecastId}/data`, that forecast's data). One call per business unit; `{weekDateId}` (`yyyy-mm-dd`, the business unit's week start) and `{forecastId}` are filled by Download |
+| `transacciones_pronosticos` | `request_context` → `request_status` | `transacciones_pronosticos` (GET `/workforcemanagement/businessunits/{businessUnitId}/weeks/{weekDateId}/shorttermforecasts`, the week's short-term forecasts; `result_data: "id"` → `{forecastId}`), `transacciones_pronosticos_data` (GET `.../shorttermforecasts/{forecastId}/data`, that forecast's data). One call per business unit; `{weekDateId}` (`yyyy-mm-dd`, the business unit's week start) and `{forecastId}` are filled by Download |
 | `funcionarios_grupos_planificacion` | `request_context` | `funcionarios_grupos_planificacion` (GET `/workforcemanagement/businessunits/{businessUnitId}/planninggroups`, the business unit's planning groups). One call per business unit |
 | `funcionarios_programaciones` | `request_context` → `request_status` → `request_activity` | `funcionarios_schedules_id` (GET, lists a business unit's week schedule ids), `funcionarios_schedules` (POST, the full agent schedules for one of those), `funcionarios_codigo_actividad` (GET, the business unit's activity code catalog — for identifying shift activities later) |
 
@@ -88,7 +88,7 @@ deploy:
     "funcionarios_programaciones": {
       "enabled": true, "domain": "funcionarios", "id_kind": "management_unit_schedule"
     },
-    "funcionarios_pronosticos":          {"enabled": true, "domain": "funcionarios", "id_kind": "business_unit"},
+    "transacciones_pronosticos":          {"enabled": true, "domain": "transacciones", "id_kind": "business_unit"},
     "funcionarios_grupos_planificacion": {"enabled": true, "domain": "funcionarios", "id_kind": "business_unit"}
   }
 }
@@ -228,7 +228,7 @@ file. A separate process downloads the management unit list into
   `{managementUnitId, businessUnitId}` pair per record
   (`id` → `managementUnitId`, `businessUnit.id` → `businessUnitId`); records
   with no `businessUnit.id` are skipped.
-- `"business_unit"` (funcionarios_pronosticos, funcionarios_grupos_planificacion)
+- `"business_unit"` (transacciones_pronosticos, funcionarios_grupos_planificacion)
   -- each record's `businessUnit.id`, **once per business unit**: several
   management units often share one, and forecasts and planning groups are per
   business unit.
@@ -240,7 +240,7 @@ file. A separate process downloads the management unit list into
 #### One file, from the EventBridge S3 event
 
 ```json
-{"tags": ["funcionarios_pronosticos", "funcionarios_grupos_planificacion"],
+{"tags": ["transacciones_pronosticos", "funcionarios_grupos_planificacion"],
  "ids_source": "management_unit_list",
  "ids_location": {"bucket": "augusta-nexa-dev-landing",
                   "key": "funcionarios/genesys/api/management_unit_list/org_id=3/year=2026/month=08/day=13/management_unit_list_2026_08_13.json"}}

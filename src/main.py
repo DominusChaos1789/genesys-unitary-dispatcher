@@ -16,7 +16,7 @@ every stage of that flow (payload.py):
     funcionarios_programaciones -> request_context, request_status,
                                     request_activity (one {managementUnitId,
                                     businessUnitId} pair per management unit)
-    funcionarios_pronosticos    -> request_context (the week's forecasts),
+    transacciones_pronosticos    -> request_context (the week's forecasts),
                                     request_status (one forecast's data),
                                     one per business unit
     funcionarios_grupos_planificacion -> request_context (planning groups),
@@ -46,7 +46,7 @@ Ids sources:
   each management unit's own id (funcionarios_adherencia), or
   {managementUnitId, businessUnitId} pairs (funcionarios_programaciones),
   depending on the tag's id_kind, or the distinct business unit ids
-  (funcionarios_pronosticos, funcionarios_grupos_planificacion). With
+  (transacciones_pronosticos, funcionarios_grupos_planificacion). With
   `ids_location`/an S3 event instead of a `date`, only that one file is
   read, for the organization of its org_id= folder -- what the EventBridge
   rule in docs/eventbridge/ sends when the download writes a file.

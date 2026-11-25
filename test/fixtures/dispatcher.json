@@ -11,7 +11,7 @@
         "recordings": {"enabled": true, "domain": "transacciones", "id_kind": "recording"},
         "funcionarios_adherencia": {"enabled": true, "domain": "funcionarios", "id_kind": "management_unit"},
         "funcionarios_programaciones": {"enabled": true, "domain": "funcionarios", "id_kind": "management_unit_schedule"},
-        "funcionarios_pronosticos": {"enabled": true, "domain": "funcionarios", "id_kind": "business_unit"},
+        "transacciones_pronosticos": {"enabled": true, "domain": "transacciones", "id_kind": "business_unit"},
         "funcionarios_grupos_planificacion": {"enabled": true, "domain": "funcionarios", "id_kind": "business_unit"}
     }
 }

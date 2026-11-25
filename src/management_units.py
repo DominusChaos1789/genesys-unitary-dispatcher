@@ -22,7 +22,7 @@ and collects ids -- which part depends on the tag's id_kind:
 - "management_unit_schedule" (funcionarios_programaciones): one
   {managementUnitId, businessUnitId} pair per record -- its schedule
   endpoints need the management unit's business unit too.
-- "business_unit" (funcionarios_pronosticos, funcionarios_grupos_planificacion):
+- "business_unit" (transacciones_pronosticos, funcionarios_grupos_planificacion):
   each record's `businessUnit.id`, once per business unit -- several
   management units can share one, and forecasts and planning groups are per
   business unit.

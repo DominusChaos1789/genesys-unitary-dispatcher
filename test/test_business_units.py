@@ -1,4 +1,4 @@
-"""funcionarios_pronosticos and funcionarios_grupos_planificacion: one call
+"""transacciones_pronosticos and funcionarios_grupos_planificacion: one call
 per business unit, ids read off the management units download -- by date, or
 from the one file an EventBridge S3 event names."""
 
@@ -10,12 +10,12 @@ import pytest
 from src.main import run
 from src.management_units import organization_from_key
 from src.sources import EventError, date_from_key
-from test.conftest import LANDING_BUCKET, payload_by_org
+from test.conftest import GENESYS_BASE_PATH, GENESYS_BASE_PATH_WFM, LANDING_BUCKET, payload_by_org
 
 PREFIX = "funcionarios/genesys/api/management_unit_list/"
 DAY_PATH = "year=2026/month=08/day=13/"
 FILE_KEY = f"{PREFIX}org_id=3/{DAY_PATH}management_unit_list_2026_08_13.json"
-TAGS = ["funcionarios_pronosticos", "funcionarios_grupos_planificacion"]
+TAGS = ["transacciones_pronosticos", "funcionarios_grupos_planificacion"]
 BU = "/api/v2/workforcemanagement/businessunits/{businessUnitId}"
 
 
@@ -61,7 +61,7 @@ def test_by_date_each_organization_gets_its_distinct_business_units(aws):
 
     result = run({"tags": TAGS, "ids_source": "management_unit_list", "date": "2026-08-13"}, _context())
 
-    forecasts = payload_by_org(result, "funcionarios_pronosticos")
+    forecasts = payload_by_org(result, "transacciones_pronosticos")
     planning = payload_by_org(result, "funcionarios_grupos_planificacion")
     assert forecasts["org-3"]["ids"] == planning["org-3"]["ids"] == ["bu-a", "bu-b"]
     assert forecasts["org-1"]["ids"] == ["bu-z"]
@@ -71,7 +71,7 @@ def test_by_date_each_organization_gets_its_distinct_business_units(aws):
 def test_forecasts_list_then_fetch_one_forecasts_data(aws):
     _put(aws["s3"], FILE_KEY, _units(("mu-1", "bu-1")))
 
-    result = run(_s3_event(tags=["funcionarios_pronosticos"]), _context())
+    result = run(_s3_event(tags=["transacciones_pronosticos"]), _context())
 
     payload = payload_by_org(result)["org-3"]
     assert payload["request_context"]["url"] == f"{BU}/weeks/{{weekDateId}}/shorttermforecasts"
@@ -102,8 +102,8 @@ def test_the_s3_event_reads_only_its_own_file_and_takes_its_date(aws):
 
     result = run(_s3_event(), _context())
 
-    assert set(payload_by_org(result, "funcionarios_pronosticos")) == {"org-3"}
-    assert payload_by_org(result, "funcionarios_pronosticos")["org-3"]["date"] == "2026-08-13"
+    assert set(payload_by_org(result, "transacciones_pronosticos")) == {"org-3"}
+    assert payload_by_org(result, "transacciones_pronosticos")["org-3"]["date"] == "2026-08-13"
     assert result["management_unit_list"]["file"] == FILE_KEY
 
 
@@ -123,7 +123,7 @@ def test_the_raw_eventbridge_s3_event_works_too(aws):
     result = run(event, _context())
 
     assert {(r["tag"], r["organization_id"]) for r in result["responses"]} == {
-        ("funcionarios_pronosticos", "org-3"),
+        ("transacciones_pronosticos", "org-3"),
         ("funcionarios_grupos_planificacion", "org-3"),
     }
 
@@ -133,7 +133,7 @@ def test_the_event_date_wins_over_the_files_day(aws):
 
     result = run({**_s3_event(), "date": "2026-08-20"}, _context())
 
-    assert payload_by_org(result, "funcionarios_pronosticos")["org-3"]["date"] == "2026-08-20"
+    assert payload_by_org(result, "transacciones_pronosticos")["org-3"]["date"] == "2026-08-20"
 
 
 def test_existing_management_unit_flows_can_use_the_s3_event(aws):
@@ -203,4 +203,16 @@ def test_a_business_unit_shared_by_several_management_units_is_sent_once(aws):
 
     result = run(_s3_event(), _context())
 
-    assert payload_by_org(result, "funcionarios_pronosticos")["org-3"]["ids"] == ["bu-1", "bu-2"]
+    assert payload_by_org(result, "transacciones_pronosticos")["org-3"]["ids"] == ["bu-1", "bu-2"]
+
+
+def test_forecasts_save_under_transacciones_and_planning_groups_under_funcionarios(aws):
+    _put(aws["s3"], FILE_KEY, _units(("mu-1", "bu-1")))
+
+    result = run(_s3_event(), _context())
+
+    forecast = payload_by_org(result, "transacciones_pronosticos")["org-3"]
+    planning = payload_by_org(result, "funcionarios_grupos_planificacion")["org-3"]
+    assert forecast["request_context"]["base_path"] == GENESYS_BASE_PATH
+    assert forecast["request_status"]["base_path"] == GENESYS_BASE_PATH
+    assert planning["request_context"]["base_path"] == GENESYS_BASE_PATH_WFM

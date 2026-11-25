@@ -363,20 +363,20 @@ flowchart LR
     end
 ```
 
-### `funcionarios_pronosticos`
+### `transacciones_pronosticos`
 
 | | |
 |---|---|
 | Ids | business unit ids (`id_kind: "business_unit"`), each distinct `businessUnit.id` in the management units download |
-| Stages | `request_context`: `GET .../businessunits/{businessUnitId}/weeks/{weekDateId}/shorttermforecasts` (`result_data: "id"`) → `request_status`: `GET .../shorttermforecasts/{forecastId}/data` (`funcionarios_pronosticos_data`, by name in `endpoints.STAGE_BY_NAME`) |
-| Saved under | `base_path_wfm` |
+| Stages | `request_context`: `GET .../businessunits/{businessUnitId}/weeks/{weekDateId}/shorttermforecasts` (`result_data: "id"`) → `request_status`: `GET .../shorttermforecasts/{forecastId}/data` (`transacciones_pronosticos_data`, by name in `endpoints.STAGE_BY_NAME`) |
+| Saved under | `base_path` (domain `transacciones`: the forecast is about call/interaction volume, not staff) |
 | Next | Download fills `{weekDateId}` (`yyyy-mm-dd`), lists the week's forecasts, and fetches each one's data with its `id` as `{forecastId}`. |
 
 ### `funcionarios_grupos_planificacion`
 
 | | |
 |---|---|
-| Ids | same as `funcionarios_pronosticos` (`business_unit`) |
+| Ids | same as `transacciones_pronosticos` (`business_unit`) |
 | Stages | `request_context`: `GET .../businessunits/{businessUnitId}/planninggroups` |
 | Saved under | `base_path_wfm` |
 | Next | Download calls it once per business unit. |

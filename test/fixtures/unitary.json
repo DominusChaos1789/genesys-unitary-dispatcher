@@ -101,16 +101,16 @@
         "path": "activity_codes",
         "result_data": "id"
     },
-    "funcionarios_pronosticos": {
-        "tag": "funcionarios_pronosticos",
+    "transacciones_pronosticos": {
+        "tag": "transacciones_pronosticos",
         "url": "/api/v2/workforcemanagement/businessunits/{businessUnitId}/weeks/{weekDateId}/shorttermforecasts",
         "type": "unitary",
         "method": "GET",
         "path": "forecasts",
         "result_data": "id"
     },
-    "funcionarios_pronosticos_data": {
-        "tag": "funcionarios_pronosticos",
+    "transacciones_pronosticos_data": {
+        "tag": "transacciones_pronosticos",
         "url": "/api/v2/workforcemanagement/businessunits/{businessUnitId}/weeks/{weekDateId}/shorttermforecasts/{forecastId}/data",
         "type": "unitary",
         "method": "GET",
