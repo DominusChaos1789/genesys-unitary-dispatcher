@@ -323,6 +323,41 @@ transcripts needs that column):
 "60edfc6c-...","BDO","org-3"
 ```
 
+##### Split by `caso_uso_nombre`
+
+When the CSV also has a `caso_uso_nombre` column, each organization gets
+**one payload per caso de uso** instead of one, under a subfolder named
+after it:
+
+```csv
+"conversacion_id","cola_nombre","bucket_nombre","prefix_nombre","cliente_prefijo","caso_uso_nombre","Organizacion"
+"6908ae62-...","Q_BDO_SAC_VZ_TRANSFER_BP_SAC","output-transit","/clientes/bdo/sac/operacion/genesys/grabaciones/","BDO","BANCA PERSONAS","org-3"
+"1497eaab-...","Q_BDO_SAC_VZ_INB_BE_PLATA","output-transit","/clientes/bdo/sac/operacion/genesys/grabaciones/","BDO","BANCA EMPRESAS","org-3"
+```
+
+```
+.../payload_request_unitary/recordings/BANCA PERSONAS/org-3.json
+.../payload_request_unitary/recordings/BANCA EMPRESAS/org-3.json
+```
+
+Each file has only that caso de uso's conversation ids, plus three top-level
+fields Download uses to decide where the recordings go: `caso_uso_nombre`,
+`bucket_nombre` and `prefix_nombre`, passed exactly as the CSV has them (a
+logical bucket name like `output-transit`, a prefix with its leading `/`).
+The same three fields also go in that file's response entry. Rules:
+
+- Every row of one caso de uso (within one organization) must name the same
+  `bucket_nombre`/`prefix_nombre`, since they decide where its files go. If
+  two rows disagree, the run fails rather than picking one.
+- Rows with an empty `caso_uso_nombre` are skipped and counted in
+  `unitary_conversations.skipped_rows`.
+- A `/` in the name becomes `-` in the key, so it can't add a folder level.
+  The payload's `caso_uso_nombre` keeps the original.
+- The token is still requested once per organization. A failed organization
+  is reported once, with all its ids.
+- `cola_nombre` and `cliente_prefijo` aren't used.
+- A CSV without the column keeps one file per organization, as before.
+
 #### recordings by date, from Athena
 
 ```json
@@ -542,6 +577,9 @@ state limit):
 ### Where it's written
 
 `s3://augusta-nexa-<env>-logs/transacciones/genesys/api/payload_request_unitary/<tag>/<organization_id>.json`
+
+(`<tag>/<caso_uso_nombre>/<organization_id>.json` for a recordings CSV with
+[`caso_uso_nombre`](#split-by-caso_uso_nombre).)
 
 Fixed per (tag, organization) — not per execution — so Status/Download always
 know where to look without being told an execution id, and a run for the same

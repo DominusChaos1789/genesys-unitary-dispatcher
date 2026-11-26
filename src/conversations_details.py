@@ -227,6 +227,34 @@ _CSV_CONVERSATION_COLUMNS = ("conversationId", "conversacion_id")
 _CSV_ORGANIZATION_COLUMN = "Organizacion"
 _CSV_COMMUNICATION_COLUMN = "communicationId"
 _CSV_ID_KINDS = (TRANSCRIPT_SESSION_ID_KIND, CONVERSATION_ID_KIND, RECORDING_ID_KIND)
+# Optional: a CSV with this column (recordings) gets one payload per value and
+# organization, under a subfolder of that name, carrying where Download must
+# save that group's files (CSV_GROUP_FIELDS).
+CSV_GROUP_COLUMN = "caso_uso_nombre"
+CSV_GROUP_FIELDS = ("bucket_nombre", "prefix_nombre")
+
+
+def _csv_groups(accepted: list[tuple[str, object, dict]], file_key: str) -> dict:
+    """{organization: {caso_uso_nombre: {caso_uso_nombre, bucket_nombre,
+    prefix_nombre, ids}}} off the accepted rows. Every row of one caso de uso
+    must name the same bucket and prefix -- they decide where its files go."""
+    groups: dict[str, dict[str, dict]] = {}
+    for organization_id, item, row in accepted:
+        name = row[CSV_GROUP_COLUMN].strip()
+        fields = {field: (row.get(field) or "").strip() for field in CSV_GROUP_FIELDS}
+        group = groups.setdefault(organization_id, {}).setdefault(
+            name, {CSV_GROUP_COLUMN: name, **fields, "ids": {}}
+        )
+        if any(group[field] != value for field, value in fields.items()):
+            raise EventError(
+                f"CSV {file_key!r}: {CSV_GROUP_COLUMN} {name!r} ({organization_id}) names more than one "
+                f"bucket/prefix: {[group[f] for f in CSV_GROUP_FIELDS]} and {list(fields.values())}"
+            )
+        group["ids"][json.dumps(item, sort_keys=True)] = item
+    for by_name in groups.values():
+        for group in by_name.values():
+            group["ids"] = [group["ids"][key] for key in sorted(group["ids"])]
+    return groups
 
 
 def _csv_conversation_column(rows: list[dict], id_kind: str, file_key: str) -> str:
@@ -258,8 +286,10 @@ def collect_from_csv(id_kind: str, rows: list[dict], file_key: str = "") -> dict
             f"a CSV carries conversation/communication ids only"
         )
     conversation_column = _csv_conversation_column(rows, id_kind, file_key)
+    grouped = bool(rows) and CSV_GROUP_COLUMN in rows[0]
 
     merged: dict[str, dict[str, object]] = {}
+    accepted: list[tuple[str, object, dict]] = []
     skipped = 0
     for row in rows:
         organization_id = (row.get(_CSV_ORGANIZATION_COLUMN) or "").strip()
@@ -269,6 +299,7 @@ def collect_from_csv(id_kind: str, rows: list[dict], file_key: str = "") -> dict
             not organization_id
             or not conversation_id
             or (id_kind == TRANSCRIPT_SESSION_ID_KIND and not communication_id)
+            or (grouped and not (row.get(CSV_GROUP_COLUMN) or "").strip())
         ):
             skipped += 1
             continue
@@ -278,9 +309,10 @@ def collect_from_csv(id_kind: str, rows: list[dict], file_key: str = "") -> dict
             else conversation_id
         )
         merged.setdefault(organization_id, {})[json.dumps(item, sort_keys=True)] = item
+        accepted.append((organization_id, item, row))
 
     ids_by_organization = {org: [items[key] for key in sorted(items)] for org, items in merged.items()}
-    return {
+    outcome = {
         "ids_by_organization": ids_by_organization,
         "summary": {
             "file": file_key,
@@ -289,6 +321,13 @@ def collect_from_csv(id_kind: str, rows: list[dict], file_key: str = "") -> dict
             "conversations": {org: len(ids) for org, ids in ids_by_organization.items()},
         },
     }
+    if grouped:
+        outcome["groups"] = _csv_groups(accepted, file_key)
+        outcome["summary"][CSV_GROUP_COLUMN] = {
+            org: {name: len(group["ids"]) for name, group in sorted(by_name.items())}
+            for org, by_name in outcome["groups"].items()
+        }
+    return outcome
 
 
 def _only_conversations(extractor, wanted: set):

@@ -243,6 +243,7 @@ def _resolve_ids(s3_client, settings: Settings, event: dict, execution_id: str, 
     ids_source = event.get("ids_source")
     summary = None
     summary_key = None
+    groups = None
 
     if ids_source is None:
         ids_by_organization = resolve_ids_by_organization(s3_client, settings, event)
@@ -278,6 +279,7 @@ def _resolve_ids(s3_client, settings: Settings, event: dict, execution_id: str, 
             outcome["summary"],
             ids_source,
         )
+        groups = outcome.get("groups")
     else:
         raise EventError(f"Unknown ids_source {ids_source!r}; expected one of {sorted(IDS_SOURCES)}")
 
@@ -290,11 +292,14 @@ def _resolve_ids(s3_client, settings: Settings, event: dict, execution_id: str, 
             "transcript_events",
         )
 
-    return ids_by_organization, summary, summary_key
+    return ids_by_organization, summary, summary_key, groups
 
 
 def _resolve_ids_by_kind(s3_client, settings: Settings, event: dict, execution_id: str, id_kinds: set[str]):
-    """({id_kind: ids by organization}, {id_kind: (summary key, summary)}).
+    """({id_kind: ids by organization}, {id_kind: (summary key, summary)},
+    {id_kind: payload groups by organization} -- only for a source that splits
+    an organization's ids into several payloads, like a recordings CSV with
+    caso_uso_nombre).
 
     Ids are resolved once per distinct id_kind among the tags requested (e.g.
     "tags": "all" mixes "survey" tags like surveys with "transcript_session"
@@ -305,14 +310,17 @@ def _resolve_ids_by_kind(s3_client, settings: Settings, event: dict, execution_i
     """
     ids_by_kind: dict[str, dict[str, list[str]]] = {}
     summaries_by_kind: dict[str, tuple[str, dict]] = {}
+    groups_by_kind: dict[str, dict] = {}
     for id_kind in sorted(id_kinds):
-        ids_by_organization, summary, summary_key = _resolve_ids(
+        ids_by_organization, summary, summary_key, groups = _resolve_ids(
             s3_client, settings, event, execution_id, id_kind
         )
         ids_by_kind[id_kind] = ids_by_organization
         if summary is not None:
             summaries_by_kind[id_kind] = (summary_key, summary)
-    return ids_by_kind, summaries_by_kind
+        if groups:
+            groups_by_kind[id_kind] = groups
+    return ids_by_kind, summaries_by_kind, groups_by_kind
 
 
 def _combined_ids(ids_by_kind: dict[str, dict[str, list]], organization_id: str) -> list:
@@ -397,6 +405,21 @@ def _build_organizations(
     return organizations, failed
 
 
+def _payload_files(tag: str, entry: dict, groups: dict | None):
+    """(key tag, extra payload fields, entry) for each file one organization's
+    entry becomes: one file normally; one per group (e.g. caso_uso_nombre)
+    when its ids source split them, under a <tag>/<group> subfolder, each
+    with only that group's ids and its own extra fields (bucket_nombre,
+    prefix_nombre)."""
+    if not groups:
+        yield tag, {}, entry
+        return
+    for name, group in sorted(groups.items()):
+        fields = {k: v for k, v in group.items() if k != "ids"}
+        # A slash in the name would add another folder level.
+        yield f"{tag}/{name.replace('/', '-')}", fields, {**entry, "ids": group["ids"]}
+
+
 def _write_payloads(
     s3_client,
     settings: Settings,
@@ -404,8 +427,10 @@ def _write_payloads(
     organizations_by_tag: dict[str, list[dict]],
     failed: list[dict],
     run_date: str,
+    groups_by_tag: dict[str, dict] | None = None,
 ) -> list[dict]:
-    """Writes one flat file per (tag, organization) pair -- overwriting
+    """Writes one flat file per (tag, organization) pair -- or per (tag,
+    group, organization) when the ids source grouped them -- overwriting
     whatever was there from a previous run -- and returns, for each one, only
     where it went -- never the payload itself."""
     # Every organization's file carries the same list, in full detail (with
@@ -425,22 +450,30 @@ def _write_payloads(
         stages = list(stages_by_tag[tag])
         for entry in entries:
             organization_id = entry["organization_id"]
-            key = settings.payload_log_key(tag, organization_id)
-            payload = build_organization_payload(tag, entry, failed_for_files, date=run_date)
-            s3_utils.write_json(s3_client, settings.payload_log_bucket, key, payload)
-            logger.info(
-                "Wrote %s/%s payload to s3://%s/%s", tag, organization_id, settings.payload_log_bucket, key
-            )
-            responses.append(
-                {
-                    "bucket": settings.payload_log_bucket,
-                    "payload_location": key,
-                    "organization_id": organization_id,
-                    "stages": stages,
-                    "failed_organizations": failed_for_response,
-                    "tag": tag,
-                }
-            )
+            groups = (groups_by_tag or {}).get(tag, {}).get(organization_id)
+            for key_tag, fields, file_entry in _payload_files(tag, entry, groups):
+                key = settings.payload_log_key(key_tag, organization_id)
+                payload = build_organization_payload(tag, file_entry, failed_for_files, date=run_date)
+                payload.update(fields)
+                s3_utils.write_json(s3_client, settings.payload_log_bucket, key, payload)
+                logger.info(
+                    "Wrote %s/%s payload to s3://%s/%s",
+                    key_tag,
+                    organization_id,
+                    settings.payload_log_bucket,
+                    key,
+                )
+                responses.append(
+                    {
+                        "bucket": settings.payload_log_bucket,
+                        "payload_location": key,
+                        "organization_id": organization_id,
+                        "stages": stages,
+                        "failed_organizations": failed_for_response,
+                        "tag": tag,
+                        **fields,
+                    }
+                )
     return responses
 
 
@@ -495,7 +528,7 @@ def run(event, context, *, today: date_ | None = None) -> dict:
         stages_by_tag[tag] = select_stages(catalog, tag)
         id_kinds_by_tag[tag] = flow_id_kind(dispatcher, tag)
 
-    ids_by_kind, summaries_by_kind = _resolve_ids_by_kind(
+    ids_by_kind, summaries_by_kind, groups_by_kind = _resolve_ids_by_kind(
         s3_client, settings, event, execution_id, set(id_kinds_by_tag.values())
     )
     logger.info("Tags %s, ids: %s", tags, {kind: len(ids) for kind, ids in ids_by_kind.items()})
@@ -503,7 +536,12 @@ def run(event, context, *, today: date_ | None = None) -> dict:
     organizations_by_tag, failed = _build_organizations(
         settings, stages_by_tag, base_path_keys, id_kinds_by_tag, ids_by_kind
     )
-    responses = _write_payloads(s3_client, settings, stages_by_tag, organizations_by_tag, failed, run_date)
+    groups_by_tag = {
+        tag: groups_by_kind[kind] for tag, kind in id_kinds_by_tag.items() if kind in groups_by_kind
+    }
+    responses = _write_payloads(
+        s3_client, settings, stages_by_tag, organizations_by_tag, failed, run_date, groups_by_tag
+    )
 
     result = {
         "execution_id": execution_id,

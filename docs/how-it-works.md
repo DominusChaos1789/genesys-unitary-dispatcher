@@ -273,7 +273,13 @@ groups its rows by `Organizacion` into `{conversationId, communicationId}`
 pairs -- no conversations_details lookup -- for `transcripts` or plain
 conversation tags (not `surveys`). For `recordings` the conversation column is
 `conversacion_id` and there's no `communicationId`: the rows become plain
-conversation ids.
+conversation ids. If the CSV also has `caso_uso_nombre`, `collect_from_csv`
+returns `groups` too: per organization, per caso de uso, its ids plus its
+`bucket_nombre`/`prefix_nombre`. `main._write_payloads` (via
+`_payload_files`) then writes one file per (caso de uso, organization) under
+`recordings/<caso_uso_nombre>/<org>.json` instead of one per organization,
+each with only that group's ids and those three fields added at the top
+level. Tokens and failures are still per organization.
 
 With a `date` and no file (`{"tag": "recordings", "ids_source":
 "unitary_conversations", "date": "2026-11-19"}`, optionally with

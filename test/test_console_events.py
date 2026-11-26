@@ -62,6 +62,8 @@ SUCCEEDS = {
     "21-unitary-csv.json": {("transcripts", "org-1"): 2, ("transcripts", "org-3"): 1},
     "22-transcript-events-fh.json": {("transcript_events", "org-3"): 2, ("transcript_events", "org-1"): 1},
     "23-recordings-csv.json": {("recordings", "org-3"): 2},
+    # Grouped by caso_uso_nombre: written under recordings/BANCA PERSONAS/org-3.json.
+    "27-recordings-caso-uso.json": {("recordings", "org-3"): 2},
     # Athena is faked below: two recorded BDO conversations.
     "24-recordings-by-date.json": {("recordings", "org-3"): 2},
     # What the EventBridge rule sends when the management units download lands
@@ -181,6 +183,21 @@ def seeded_landing(aws, seeded_source_files):
                 '"r1","BDO","org-3"',
                 '"r1","BDO","org-3"',
                 '"r2","BDO","org-3"',
+            ]
+        ).encode("utf-8"),
+    )
+    # 27-recordings-caso-uso: the export with caso_uso_nombre/bucket_nombre/prefix_nombre.
+    s3.put_object(
+        Bucket=OUTPUT_BUCKET,
+        Key="transacciones/genesys/unitary_process/recordings/37f23823-25ac-4e51-8c2b-c7bd685bbfbc.csv",
+        Body="\n".join(
+            [
+                '"conversacion_id","cola_nombre","bucket_nombre","prefix_nombre","cliente_prefijo",'
+                '"caso_uso_nombre","Organizacion"',
+                '"r1","Q_A","output-transit","/clientes/bdo/sac/operacion/genesys/grabaciones/","BDO",'
+                '"BANCA PERSONAS","org-3"',
+                '"r2","Q_A","output-transit","/clientes/bdo/sac/operacion/genesys/grabaciones/","BDO",'
+                '"BANCA PERSONAS","org-3"',
             ]
         ).encode("utf-8"),
     )
