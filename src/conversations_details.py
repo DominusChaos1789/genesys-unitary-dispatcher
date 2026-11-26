@@ -232,6 +232,8 @@ _CSV_ID_KINDS = (TRANSCRIPT_SESSION_ID_KIND, CONVERSATION_ID_KIND, RECORDING_ID_
 # save that group's files (CSV_GROUP_FIELDS).
 CSV_GROUP_COLUMN = "caso_uso_nombre"
 CSV_GROUP_FIELDS = ("bucket_nombre", "prefix_nombre")
+# Rows with no caso de uso still get their payload, under this folder.
+CSV_UNKNOWN_GROUP = "CASO_USO_UNKNOWN"
 
 
 def _csv_groups(accepted: list[tuple[str, object, dict]], file_key: str) -> dict:
@@ -240,7 +242,7 @@ def _csv_groups(accepted: list[tuple[str, object, dict]], file_key: str) -> dict
     must name the same bucket and prefix -- they decide where its files go."""
     groups: dict[str, dict[str, dict]] = {}
     for organization_id, item, row in accepted:
-        name = row[CSV_GROUP_COLUMN].strip()
+        name = (row.get(CSV_GROUP_COLUMN) or "").strip() or CSV_UNKNOWN_GROUP
         fields = {field: (row.get(field) or "").strip() for field in CSV_GROUP_FIELDS}
         group = groups.setdefault(organization_id, {}).setdefault(
             name, {CSV_GROUP_COLUMN: name, **fields, "ids": {}}
@@ -299,7 +301,6 @@ def collect_from_csv(id_kind: str, rows: list[dict], file_key: str = "") -> dict
             not organization_id
             or not conversation_id
             or (id_kind == TRANSCRIPT_SESSION_ID_KIND and not communication_id)
-            or (grouped and not (row.get(CSV_GROUP_COLUMN) or "").strip())
         ):
             skipped += 1
             continue

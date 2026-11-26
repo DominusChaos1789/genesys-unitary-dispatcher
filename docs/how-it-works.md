@@ -285,10 +285,13 @@ With a `date` and no file (`{"tag": "recordings", "ids_source":
 "unitary_conversations", "date": "2026-11-19"}`, optionally with
 `cliente_prefijo`/`operacion_prefijo`/`organization_id`),
 `recorded_conversations.collect_recorded_conversations` runs one Athena query
-over the curated sessions table for that day's recorded conversations, maps
-`cliente_prefijo` to an organization (`ORGANIZATION_RULES`), and waits for it
-(`start_query_execution` → `get_query_execution` until SUCCEEDED → paged
-`get_query_results`). Only `recordings` can be fed this way.
+and waits for it (`start_query_execution` → `get_query_execution` until
+SUCCEEDED → paged `get_query_results`). The query joins the sessions table,
+the segments table and the parametric catalog (`parametrica-core`,
+`grabacion_estado = '1'`), and returns the same columns as the recordings CSV.
+Its rows are then handed to `collect_from_csv`, so they're split by
+`caso_uso_nombre` exactly like the CSV. Only `recordings` can be fed this
+way.
 
 ### Real-time conversation events: ids for `transcript_events`
 
@@ -490,7 +493,7 @@ them. Problems specific to one organization only affect that organization.
 | [src/conversations_details.py](../src/conversations_details.py) | ids from the Genesys conversations download: surveyIds/`{conversationId, communicationId}` pairs/conversationId |
 | [src/management_units.py](../src/management_units.py) | ids from the Genesys management units download (`management_unit_list`), by date or from one file: each record's `id`, its `{id, businessUnit.id}` pair, or the distinct `businessUnit.id`s |
 | [src/transcript_events.py](../src/transcript_events.py) | resolves `transcript_events`' event ids into `{conversationId, communicationId}` pairs, one real-time event file at a time; or reads them straight off a Firehose delivery file |
-| [src/recorded_conversations.py](../src/recorded_conversations.py) | recordings by date: the Athena query for a day's recorded conversations, grouped by organization |
+| [src/recorded_conversations.py](../src/recorded_conversations.py) | recordings by date: the Athena query (sessions + segments + parametric catalog) for a day's recorded conversations, then the same per-caso-de-uso split as the CSV |
 | [src/contract.py](../src/contract.py) | the contract model; contract discovery and loading |
 | [src/transform.py](../src/transform.py) | source record → business row: rename, cast, transformations, dedup |
 | [src/technical_columns.py](../src/technical_columns.py) | technical columns engine; `output_core` / `output_atts` rows |

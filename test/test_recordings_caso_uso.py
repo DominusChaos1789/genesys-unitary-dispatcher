@@ -100,13 +100,20 @@ def test_one_token_per_organization_however_many_casos_de_uso(output_bucket, gen
     assert genesys_api["requested_orgs"] == ["org-3"]
 
 
-def test_rows_without_a_caso_de_uso_are_skipped(output_bucket):
-    _put(output_bucket, _row("c1", ""), _row("c2", "BANCA PERSONAS"))
+def test_rows_without_a_caso_de_uso_go_to_caso_uso_unknown(output_bucket):
+    _put(output_bucket, _row("c1", ""), _row("c3", "  "), _row("c2", "BANCA PERSONAS"))
 
     result = run(EVENT, _context())
 
-    assert [r["payload_location"] for r in result["responses"]] == [f"{PREFIX}/BANCA PERSONAS/org-3.json"]
-    assert result["unitary_conversations"]["skipped_rows"] == 1
+    assert sorted(r["payload_location"] for r in result["responses"]) == [
+        f"{PREFIX}/BANCA PERSONAS/org-3.json",
+        f"{PREFIX}/CASO_USO_UNKNOWN/org-3.json",
+    ]
+    unknown = _read(output_bucket, f"{PREFIX}/CASO_USO_UNKNOWN/org-3.json")
+    assert unknown["ids"] == ["c1", "c3"]
+    assert unknown["caso_uso_nombre"] == "CASO_USO_UNKNOWN"
+    assert unknown["bucket_nombre"] == "output-transit"
+    assert result["unitary_conversations"]["skipped_rows"] == 0
 
 
 def test_one_caso_de_uso_cannot_name_two_destinations(output_bucket):

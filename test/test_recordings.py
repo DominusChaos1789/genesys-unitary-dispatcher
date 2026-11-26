@@ -36,6 +36,29 @@ def _context():
     return SimpleNamespace(aws_request_id="req-recordings")
 
 
+ATHENA_COLUMNS = (
+    "conversacion_id",
+    "cola_nombre",
+    "bucket_nombre",
+    "prefix_nombre",
+    "cliente_prefijo",
+    "caso_uso_nombre",
+    "organizacion",
+)
+GRABACIONES = "/clientes/bdo/sac/operacion/genesys/grabaciones/"
+
+
+def _athena_row(
+    conversation_id, organization, caso_uso="BANCA PERSONAS", bucket="output-transit", prefix=GRABACIONES
+):
+    return (conversation_id, "Q_BDO_SAC", bucket, prefix, "BDO", caso_uso, organization)
+
+
+def _cell(value):
+    # Athena leaves VarCharValue out for a NULL.
+    return {} if value is None else {"VarCharValue": value}
+
+
 class FakeAthena:
     """Just enough of the Athena client: queued states, then paged rows."""
 
@@ -66,8 +89,9 @@ class FakeAthena:
 
         class _Paginator:
             def paginate(self, QueryExecutionId):
-                header = {"Data": [{"VarCharValue": "conversacion_id"}, {"VarCharValue": "organizacion"}]}
-                rows = [{"Data": [{"VarCharValue": c}, {"VarCharValue": o}]} for c, o in fake.rows]
+                # The query's columns; Athena lower-cases the "Organizacion" alias.
+                header = {"Data": [{"VarCharValue": name} for name in ATHENA_COLUMNS]}
+                rows = [{"Data": [_cell(value) for value in _athena_row(*row)]} for row in fake.rows]
                 # Two pages; only the first one starts with the header.
                 yield {"ResultSet": {"Rows": [header, *rows[:1]]}}
                 yield {"ResultSet": {"Rows": rows[1:]}}
@@ -185,7 +209,7 @@ def test_by_date_filters_go_into_the_query(aws, athena):
     query = client.started[0]["QueryString"]
     assert "cliente_prefijo = 'BDO'" in query
     assert "operacion_prefijo = 'SAC'" in query
-    assert "WHERE organizacion = 'org-3'" in query
+    assert "replace(lower(b.organizacion_id), '_0', '-') = 'org-3'" in query
     assert result["unitary_conversations"]["filters"] == {
         "cliente_prefijo": "BDO",
         "operacion_prefijo": "SAC",
@@ -244,15 +268,59 @@ def test_no_rows_writes_no_payload(aws, athena):
     assert result["responses"] == []
 
 
-def test_the_query_maps_cliente_prefijo_to_organizations():
+def test_the_query_joins_sessions_segments_and_the_parametric_catalog():
     query = build_query(load_settings(), date(2026, 11, 19), {})
 
-    assert "WHEN lower(cliente_prefijo) LIKE '%bdb%' THEN 'org-2'" in query
-    assert "WHEN lower(cliente_prefijo) LIKE '%bdo%' THEN 'org-3'" in query
-    assert "ELSE 'org-3'" in query
-    assert "interaccion_grabada = true" in query
-    assert '"augusta-nexa-dev-transacciones-curated"."genesys-conversaciones-sesiones-core"' in query
-    assert "WHERE organizacion" not in query
+    assert 'FROM "augusta-nexa-dev-transacciones-curated"."genesys-conversaciones-sesiones-core" a' in query
+    assert (
+        '"augusta-nexa-dev-transacciones-curated"."genesys-conversaciones-sesiones-segmentos-core" s' in query
+    )
+    assert '"augusta-nexa-dev-catalogos-curated"."parametrica-core" WHERE grabacion_estado = \'1\'' in query
+    assert "lower(s.cola_atencion_id) = lower(p.cola_id)" in query
+    assert "replace(lower(b.organizacion_id), '_0', '-') AS Organizacion" in query
+    assert "a.interaccion_grabada = true" in query
+    assert "CAST(a.conversacion_fecha_inicio AS DATE) = DATE '2026-11-19'" in query
+    for column in ("b.cola_nombre", "b.bucket_nombre", "b.prefix_nombre", "b.caso_uso_nombre"):
+        assert column in query
+    assert "= 'org-" not in query
+
+
+def test_the_catalog_tables_can_be_configured(monkeypatch):
+    monkeypatch.setenv("ATHENA_CATALOG_DATABASE", "my-catalog")
+    monkeypatch.setenv("ATHENA_CATALOG_TABLE", "my-param")
+    monkeypatch.setenv("ATHENA_SEGMENTS_TABLE", "my-segments")
+
+    query = build_query(load_settings(), date(2026, 11, 19), {})
+
+    assert '"my-catalog"."my-param"' in query
+    assert '"augusta-nexa-dev-transacciones-curated"."my-segments"' in query
+
+
+def test_by_date_splits_by_caso_de_uso_like_the_csv(aws, athena):
+    athena(
+        [
+            ("c1", "org-3", "BANCA PERSONAS"),
+            ("c2", "org-3", "BANCA EMPRESAS", "output-transit", "/empresas/"),
+            ("c3", "org-3", None, None, None),
+        ]
+    )
+
+    result = run(DATE_EVENT, _context())
+
+    by_location = {r["payload_location"].split("recordings/", 1)[1]: r for r in result["responses"]}
+    assert sorted(by_location) == [
+        "BANCA EMPRESAS/org-3.json",
+        "BANCA PERSONAS/org-3.json",
+        "CASO_USO_UNKNOWN/org-3.json",
+    ]
+    assert by_location["BANCA EMPRESAS/org-3.json"]["prefix_nombre"] == "/empresas/"
+    assert by_location["BANCA PERSONAS/org-3.json"]["bucket_nombre"] == "output-transit"
+    assert by_location["CASO_USO_UNKNOWN/org-3.json"]["bucket_nombre"] == ""
+    summary = result["unitary_conversations"]
+    assert summary["caso_uso_nombre"] == {
+        "org-3": {"BANCA EMPRESAS": 1, "BANCA PERSONAS": 1, "CASO_USO_UNKNOWN": 1}
+    }
+    assert "file" not in summary
 
 
 # --- conversations_details / unitary JSON ---------------------------------------

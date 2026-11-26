@@ -36,6 +36,11 @@ DEFAULT_MANAGEMENT_UNIT_LIST_PREFIX = "funcionarios/genesys/api/management_unit_
 # augusta-nexa-<env>-transacciones-curated.
 DEFAULT_ATHENA_TABLE = "genesys-conversaciones-sesiones-core"
 DEFAULT_ATHENA_WORKGROUP = "primary"
+# recordings by date also joins the segments table (same database) and the
+# parametric catalog (augusta-nexa-<env>-catalogos-curated) for each queue's
+# caso de uso and recording destination.
+DEFAULT_ATHENA_SEGMENTS_TABLE = "genesys-conversaciones-sesiones-segmentos-core"
+DEFAULT_ATHENA_CATALOG_TABLE = "parametrica-core"
 
 # TEMPORARY: Genesys organization ids (as the real-time firehose files carry
 # them) -> this Lambda's organization ids ("org-N", the org_id=N folders and
@@ -112,6 +117,9 @@ class Settings:
     athena_table: str = DEFAULT_ATHENA_TABLE
     athena_workgroup: str = DEFAULT_ATHENA_WORKGROUP
     athena_output_location: str = ""
+    athena_segments_table: str = DEFAULT_ATHENA_SEGMENTS_TABLE
+    athena_catalog_database: str = ""
+    athena_catalog_table: str = DEFAULT_ATHENA_CATALOG_TABLE
 
     def resolve_bucket(self, name: str) -> str:
         """ "landing" -> "augusta-nexa-dev-landing"; full names pass through."""
@@ -162,4 +170,7 @@ def load_settings() -> Settings:
         athena_table=os.environ.get("ATHENA_TABLE", DEFAULT_ATHENA_TABLE),
         athena_workgroup=os.environ.get("ATHENA_WORKGROUP", DEFAULT_ATHENA_WORKGROUP),
         athena_output_location=os.environ.get("ATHENA_OUTPUT_LOCATION", ""),
+        athena_segments_table=os.environ.get("ATHENA_SEGMENTS_TABLE", DEFAULT_ATHENA_SEGMENTS_TABLE),
+        athena_catalog_database=os.environ.get("ATHENA_CATALOG_DATABASE", f"{stack}-catalogos-curated"),
+        athena_catalog_table=os.environ.get("ATHENA_CATALOG_TABLE", DEFAULT_ATHENA_CATALOG_TABLE),
     )

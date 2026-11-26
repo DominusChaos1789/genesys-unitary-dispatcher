@@ -1,4 +1,4 @@
-"""Recorded conversations of a day, from the curated sessions table in Athena.
+"""Recorded conversations of a day, from the curated tables in Athena.
 
 recordings can be fed by date instead of by a file:
 
@@ -8,20 +8,35 @@ optionally narrowed with any of
 
     "cliente_prefijo": "BDO", "operacion_prefijo": "SAC", "organization_id": "org-3"
 
-This runs one Athena query over the curated sessions table (database
-augusta-nexa-<env>-transacciones-curated, table
-genesys-conversaciones-sesiones-core, over s3://augusta-nexa-<env>-refined/
-transacciones/curated/genesys-conversaciones-sesiones/core/data/): every
-recorded conversation (`interaccion_grabada = true`) that started that day,
-with its organization worked out from `cliente_prefijo` (ORGANIZATION_RULES).
-The table's year=/month=/day= partitions are the day the data was processed,
-not the day the conversation happened, so the filter is on
-`conversacion_fecha_inicio`, not on the partitions.
+This runs one Athena query that returns the same columns as the recordings
+CSV export -- conversacion_id, cola_nombre, bucket_nombre, prefix_nombre,
+cliente_prefijo, caso_uso_nombre, Organizacion -- so its rows go through the
+very same code as that CSV (conversations_details.collect_from_csv): one
+payload per (caso_uso_nombre, organization), each carrying its bucket_nombre
+and prefix_nombre.
+
+The query joins
+
+- the sessions table (augusta-nexa-<env>-transacciones-curated.
+  genesys-conversaciones-sesiones-core): recorded conversations
+  (`interaccion_grabada = true`) that started that day
+  (`conversacion_fecha_inicio`);
+- the segments table (same database, genesys-conversaciones-sesiones-
+  segmentos-core): each conversation's queues (`cola_atencion_id`);
+- the parametric catalog (augusta-nexa-<env>-catalogos-curated.
+  parametrica-core): per queue with `grabacion_estado = '1'`, its caso de
+  uso, destination bucket/prefix and organization
+  (`organizacion_id` "ORG_03" -> "org-3").
+
+So only conversations through a queue the catalog has recordings turned on
+for come back. The sessions table's year=/month=/day= partitions are the day
+the data was processed, not the day the conversation happened, so the filter
+is on `conversacion_fecha_inicio`, not on the partitions.
 
 The Lambda's role needs athena:StartQueryExecution/GetQueryExecution/
-GetQueryResults/StopQueryExecution, glue:GetTable/GetPartitions on that
-table, read access to the refined bucket and write access to the
-workgroup's (or ATHENA_OUTPUT_LOCATION's) query results location.
+GetQueryResults/StopQueryExecution, glue:GetTable/GetPartitions on the three
+tables, read access to their buckets and write access to the workgroup's (or
+ATHENA_OUTPUT_LOCATION's) query results location.
 """
 
 import logging
@@ -32,23 +47,21 @@ from datetime import date
 import boto3
 
 from src.config import Settings
+from src.conversations_details import collect_from_csv
+from src.dispatcher_config import RECORDING_ID_KIND
 from src.sources import EventError
 
 logger = logging.getLogger(__name__)
 
-# cliente_prefijo (lowercased, LIKE pattern) -> organization, first match wins;
-# anything else is DEFAULT_ORGANIZATION. Same rules as the CSV export query.
-ORGANIZATION_RULES = (
-    ("%bdb%", "org-2"),
-    ("%bpp%", "org-3"),
-    ("%bdo%", "org-3"),
-)
-DEFAULT_ORGANIZATION = "org-3"
-# Optional event filters -> the column each one narrows.
-FILTERS = {"cliente_prefijo": "cliente_prefijo", "operacion_prefijo": "operacion_prefijo"}
+# Optional event filters -> the sessions table column each one narrows.
+FILTERS = {"cliente_prefijo": "a.cliente_prefijo", "operacion_prefijo": "a.operacion_prefijo"}
+# The catalog's organizacion_id ("ORG_03") as this Lambda's organization ("org-3").
+ORGANIZATION_EXPRESSION = "replace(lower(b.organizacion_id), '_0', '-')"
 _SAFE_VALUE = re.compile(r"^[A-Za-z0-9_-]+$")
 _ORGANIZATION = re.compile(r"^org-\d+$")
 _RUNNING_STATES = ("QUEUED", "RUNNING")
+# Athena lower-cases column aliases; the CSV export's column is "Organizacion".
+_COLUMN_NAMES = {"organizacion": "Organizacion"}
 
 
 def _athena_client(settings: Settings):
@@ -70,29 +83,40 @@ def _filters(event: dict) -> dict[str, str]:
 
 
 def build_query(settings: Settings, day: date, filters: dict[str, str]) -> str:
-    cases = "\n".join(
-        f"            WHEN lower(cliente_prefijo) LIKE '{pattern}' THEN '{organization}'"
-        for pattern, organization in ORGANIZATION_RULES
-    )
     conditions = [
-        "interaccion_grabada = true",
-        f"CAST(conversacion_fecha_inicio AS DATE) = DATE '{day.isoformat()}'",
+        "a.interaccion_grabada = true",
+        f"CAST(a.conversacion_fecha_inicio AS DATE) = DATE '{day.isoformat()}'",
         *(f"{FILTERS[key]} = '{value}'" for key, value in filters.items() if key in FILTERS),
     ]
-    where = "\n      AND ".join(conditions)
-    query = f"""SELECT DISTINCT conversacion_id, organizacion FROM (
-    SELECT
-        lower(conversacion_id) AS conversacion_id,
-        CASE
-{cases}
-            ELSE '{DEFAULT_ORGANIZATION}'
-        END AS organizacion
-    FROM "{settings.athena_database}"."{settings.athena_table}"
-    WHERE {where}
-)"""
     if "organization_id" in filters:
-        query += f"\nWHERE organizacion = '{filters['organization_id']}'"
-    return query
+        conditions.append(f"{ORGANIZATION_EXPRESSION} = '{filters['organization_id']}'")
+    where = "\n  AND ".join(conditions)
+    sessions = f'"{settings.athena_database}"."{settings.athena_table}"'
+    segments = f'"{settings.athena_database}"."{settings.athena_segments_table}"'
+    catalog = f'"{settings.athena_catalog_database}"."{settings.athena_catalog_table}"'
+    return f"""SELECT DISTINCT
+    lower(a.conversacion_id) AS conversacion_id,
+    b.cola_nombre,
+    b.bucket_nombre,
+    b.prefix_nombre,
+    a.cliente_prefijo,
+    b.caso_uso_nombre,
+    {ORGANIZATION_EXPRESSION} AS Organizacion
+FROM {sessions} a
+INNER JOIN (
+    SELECT DISTINCT
+        s.conversacion_id,
+        p.bucket_nombre,
+        p.prefix_nombre,
+        p.cola_nombre,
+        p.organizacion_id,
+        p.caso_uso_nombre
+    FROM {segments} s
+    INNER JOIN (
+        SELECT * FROM {catalog} WHERE grabacion_estado = '1'
+    ) AS p ON lower(s.cola_atencion_id) = lower(p.cola_id)
+) AS b ON lower(a.conversacion_id) = lower(b.conversacion_id)
+WHERE {where}"""
 
 
 def _wait(client, query_id: str, timeout_seconds: float, poll_seconds: float, sleep) -> None:
@@ -112,16 +136,18 @@ def _wait(client, query_id: str, timeout_seconds: float, poll_seconds: float, sl
         sleep(poll_seconds)
 
 
-def _rows(client, query_id: str) -> list[tuple[str, str]]:
+def _rows(client, query_id: str) -> list[dict]:
+    """The result as one dict per row, keyed by column name -- the first row
+    Athena returns is the header."""
+    header = None
     rows = []
-    header_skipped = False
     for page in client.get_paginator("get_query_results").paginate(QueryExecutionId=query_id):
         for row in page["ResultSet"]["Rows"]:
             values = [cell.get("VarCharValue") for cell in row["Data"]]
-            if not header_skipped:  # Athena returns the column names as the first row
-                header_skipped = True
+            if header is None:
+                header = [_COLUMN_NAMES.get(name, name) for name in values]
                 continue
-            rows.append((values[0], values[1]))
+            rows.append(dict(zip(header, values)))
     return rows
 
 
@@ -135,12 +161,12 @@ def collect_recorded_conversations(
     poll_seconds: float = 1,
     sleep=time.sleep,
 ) -> dict:
-    """{"ids_by_organization": {organization: [conversation id, ...]}, "summary": ...}."""
+    """Like a recordings CSV: {"ids_by_organization": ..., "groups": ...
+    (per caso_uso_nombre), "summary": ...}."""
     filters = _filters(event)
     client = client or _athena_client(settings)
-    query = build_query(settings, day, filters)
     request = {
-        "QueryString": query,
+        "QueryString": build_query(settings, day, filters),
         "QueryExecutionContext": {"Database": settings.athena_database},
         "WorkGroup": settings.athena_workgroup,
     }
@@ -150,17 +176,13 @@ def collect_recorded_conversations(
     logger.info("Athena query %s for recorded conversations of %s %s", query_id, day, filters)
     _wait(client, query_id, timeout_seconds, poll_seconds, sleep)
 
-    grouped: dict[str, set[str]] = {}
-    for conversation_id, organization_id in _rows(client, query_id):
-        if conversation_id and organization_id:
-            grouped.setdefault(organization_id, set()).add(conversation_id)
-    ids_by_organization = {org: sorted(ids) for org, ids in sorted(grouped.items())}
-    return {
-        "ids_by_organization": ids_by_organization,
-        "summary": {
-            "query_execution_id": query_id,
-            "date": day.isoformat(),
-            "filters": filters,
-            "conversations": {org: len(ids) for org, ids in ids_by_organization.items()},
-        },
+    outcome = collect_from_csv(RECORDING_ID_KIND, _rows(client, query_id), f"athena:{query_id}")
+    summary = outcome["summary"]
+    summary.pop("file", None)
+    outcome["summary"] = {
+        "query_execution_id": query_id,
+        "date": day.isoformat(),
+        "filters": filters,
+        **summary,
     }
+    return outcome

@@ -349,8 +349,9 @@ The same three fields also go in that file's response entry. Rules:
 - Every row of one caso de uso (within one organization) must name the same
   `bucket_nombre`/`prefix_nombre`, since they decide where its files go. If
   two rows disagree, the run fails rather than picking one.
-- Rows with an empty `caso_uso_nombre` are skipped and counted in
-  `unitary_conversations.skipped_rows`.
+- Rows with an empty `caso_uso_nombre` aren't dropped: they go to a
+  `CASO_USO_UNKNOWN` folder (`recordings/CASO_USO_UNKNOWN/<org>.json`), with
+  whatever `bucket_nombre`/`prefix_nombre` those rows carry (empty if none).
 - A `/` in the name becomes `-` in the key, so it can't add a folder level.
   The payload's `caso_uso_nombre` keeps the original.
 - The token is still requested once per organization. A failed organization
@@ -367,22 +368,34 @@ The same three fields also go in that file's response entry. Rules:
 ```
 
 With a `date` and **no file**, the run queries Athena
-(`recorded_conversations.py`) for every recorded conversation
-(`interaccion_grabada = true`) that started that day
-(`conversacion_fecha_inicio`), in `"augusta-nexa-<env>-transacciones-curated"."genesys-conversaciones-sesiones-core"`
-(over `s3://augusta-nexa-<env>-refined/transacciones/curated/genesys-conversaciones-sesiones/core/data/`).
-`cliente_prefijo`, `operacion_prefijo` and `organization_id` are optional
-filters. Each conversation's organization comes from `cliente_prefijo`, the
-same rules as the CSV export query (`bdb` → `org-2`, `bpp`/`bdo` → `org-3`,
-anything else → `org-3`; `ORGANIZATION_RULES`). The table's `year=/month=/day=`
-partitions are the day the data was *processed*, not the conversation's day,
-so the query filters on `conversacion_fecha_inicio` rather than on the
-partitions. Only `recordings` can be fed this way. A failed query (or one
+(`recorded_conversations.py`). The query returns the same columns as the
+recordings CSV export (`conversacion_id`, `cola_nombre`, `bucket_nombre`,
+`prefix_nombre`, `cliente_prefijo`, `caso_uso_nombre`, `Organizacion`), and its
+rows go through the same code as that CSV: one payload per (caso de uso,
+organization) with its `bucket_nombre`/`prefix_nombre`,
+[as above](#split-by-caso_uso_nombre). It joins:
+
+- `"augusta-nexa-<env>-transacciones-curated"."genesys-conversaciones-sesiones-core"`:
+  recorded conversations (`interaccion_grabada = true`) that started that day
+  (`conversacion_fecha_inicio`).
+- `"augusta-nexa-<env>-transacciones-curated"."genesys-conversaciones-sesiones-segmentos-core"`:
+  each conversation's queues (`cola_atencion_id`).
+- `"augusta-nexa-<env>-catalogos-curated"."parametrica-core"`: for queues with
+  `grabacion_estado = '1'`, their caso de uso, destination bucket/prefix and
+  organization (`organizacion_id` `ORG_03` → `org-3`).
+
+Only conversations through a queue the catalog has recordings turned on for
+come back. `cliente_prefijo`, `operacion_prefijo` and `organization_id` are
+optional filters. The sessions table's `year=/month=/day=` partitions are the
+day the data was *processed*, not the conversation's day, so the query
+filters on `conversacion_fecha_inicio` rather than on the partitions. Only
+`recordings` can be fed this way. A failed query (or one
 still running after 10 minutes, which is then stopped) fails the run; the
 query id is in the summary under `unitary_conversations.query_execution_id`.
 The Lambda's role needs `athena:StartQueryExecution`/`GetQueryExecution`/
-`GetQueryResults`/`StopQueryExecution`, `glue:GetTable`/`GetPartitions`, read
-on the refined bucket and write on the workgroup's query results location.
+`GetQueryResults`/`StopQueryExecution`, `glue:GetTable`/`GetPartitions` on the
+three tables, read on their buckets and write on the workgroup's query results
+location.
 
 ### Ids from real-time conversation events (`transcript_events`)
 
@@ -674,6 +687,9 @@ All optional.
 | `ATHENA_TABLE` | `genesys-conversaciones-sesiones-core` | recordings by date: the curated sessions table. |
 | `ATHENA_WORKGROUP` | `primary` | recordings by date: the Athena workgroup. |
 | `ATHENA_OUTPUT_LOCATION` | *(unset)* | recordings by date: an `s3://` query results location; unset uses the workgroup's own. |
+| `ATHENA_SEGMENTS_TABLE` | `genesys-conversaciones-sesiones-segmentos-core` | recordings by date: the segments table (in `ATHENA_DATABASE`), for each conversation's queues. |
+| `ATHENA_CATALOG_DATABASE` | `augusta-nexa-<env>-catalogos-curated` | recordings by date: the database of the parametric catalog. |
+| `ATHENA_CATALOG_TABLE` | `parametrica-core` | recordings by date: the parametric catalog (queue → caso de uso, bucket/prefix, organization). |
 
 ## Deployment
 
