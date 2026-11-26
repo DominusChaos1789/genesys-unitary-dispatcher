@@ -349,6 +349,11 @@ The same three fields also go in that file's response entry. Rules:
 - Every row of one caso de uso (within one organization) must name the same
   `bucket_nombre`/`prefix_nombre`, since they decide where its files go. If
   two rows disagree, the run fails rather than picking one.
+- A conversation belongs to **one** caso de uso per organization (one
+  payload, one download). In a CSV its **first row** wins, so the export
+  should be ordered by segment start, like the by-date query below. Later rows
+  for it under another caso de uso are dropped and counted in
+  `unitary_conversations.rows_in_another_caso_uso`.
 - Rows with an empty `caso_uso_nombre` aren't dropped: they go to a
   `CASO_USO_UNKNOWN` folder (`recordings/CASO_USO_UNKNOWN/<org>.json`), with
   whatever `bucket_nombre`/`prefix_nombre` those rows carry (empty if none).
@@ -385,7 +390,9 @@ organization) with its `bucket_nombre`/`prefix_nombre`,
   organization (`organizacion_id` `ORG_03` → `org-3`).
 
 Only conversations through a queue the catalog has recordings turned on for
-come back. `cliente_prefijo`, `operacion_prefijo` and `organization_id` are
+come back. A conversation that went through several of those queues keeps
+only its **first** one (earliest segment by `conversaciones_fecha_inicio`,
+`ATHENA_SEGMENT_ORDER_COLUMN`), so it lands in a single caso de uso. `cliente_prefijo`, `operacion_prefijo` and `organization_id` are
 optional filters. The sessions table's `year=/month=/day=` partitions are the
 day the data was *processed*, not the conversation's day, so the query
 filters on `conversacion_fecha_inicio` rather than on the partitions. Only
@@ -689,6 +696,7 @@ All optional.
 | `ATHENA_OUTPUT_LOCATION` | *(unset)* | recordings by date: an `s3://` query results location; unset uses the workgroup's own. |
 | `ATHENA_SEGMENTS_TABLE` | `genesys-conversaciones-sesiones-segmentos-core` | recordings by date: the segments table (in `ATHENA_DATABASE`), for each conversation's queues. |
 | `ATHENA_CATALOG_DATABASE` | `augusta-nexa-<env>-catalogos-curated` | recordings by date: the database of the parametric catalog. |
+| `ATHENA_SEGMENT_ORDER_COLUMN` | `conversaciones_fecha_inicio` | recordings by date: the segments-table column that orders a conversation's queues; its first queue with recordings on decides its caso de uso. Must be a plain column name. |
 | `ATHENA_CATALOG_TABLE` | `parametrica-core` | recordings by date: the parametric catalog (queue → caso de uso, bucket/prefix, organization). |
 
 ## Deployment

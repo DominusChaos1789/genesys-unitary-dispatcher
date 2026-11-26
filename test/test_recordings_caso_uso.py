@@ -182,3 +182,30 @@ def test_a_failed_organization_is_reported_once_for_all_its_casos_de_uso(output_
     assert result["failed_organizations"] == [
         {"organization_id": "org-1", "id_count": 2, "error": "oauth down for org-1"}
     ]
+
+
+def test_a_conversation_belongs_to_only_its_first_caso_de_uso(output_bucket):
+    _put(
+        output_bucket,
+        _row("c1", "BANCA PERSONAS"),
+        _row("c2", "BANCA EMPRESAS", prefix="/empresas/"),
+        _row("c1", "BANCA EMPRESAS", prefix="/empresas/"),
+        _row("c1", "BANCA PERSONAS"),
+    )
+
+    result = run(EVENT, _context())
+
+    assert _read(output_bucket, f"{PREFIX}/BANCA PERSONAS/org-3.json")["ids"] == ["c1"]
+    assert _read(output_bucket, f"{PREFIX}/BANCA EMPRESAS/org-3.json")["ids"] == ["c2"]
+    summary = result["unitary_conversations"]
+    assert summary["rows_in_another_caso_uso"] == 1
+    assert summary["caso_uso_nombre"] == {"org-3": {"BANCA EMPRESAS": 1, "BANCA PERSONAS": 1}}
+
+
+def test_the_same_conversation_in_two_organizations_is_kept_in_both(output_bucket):
+    _put(output_bucket, _row("c1", "A", organization="org-1"), _row("c1", "B", organization="org-3"))
+
+    result = run(EVENT, _context())
+
+    assert len(result["responses"]) == 2
+    assert result["unitary_conversations"]["rows_in_another_caso_uso"] == 0

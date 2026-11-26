@@ -285,6 +285,27 @@ def test_the_query_joins_sessions_segments_and_the_parametric_catalog():
     assert "= 'org-" not in query
 
 
+def test_the_query_keeps_each_conversations_first_recorded_queue():
+    query = build_query(load_settings(), date(2026, 11, 19), {})
+
+    assert "PARTITION BY lower(s.conversacion_id)" in query
+    assert "ORDER BY s.conversaciones_fecha_inicio ASC" in query
+    assert "WHERE queue_order = 1" in query
+
+
+def test_the_segment_order_column_can_be_configured(monkeypatch):
+    monkeypatch.setenv("ATHENA_SEGMENT_ORDER_COLUMN", "segmento_fecha_inicio")
+
+    assert "ORDER BY s.segmento_fecha_inicio ASC" in build_query(load_settings(), date(2026, 11, 19), {})
+
+
+def test_an_unsafe_segment_order_column_is_rejected(monkeypatch):
+    monkeypatch.setenv("ATHENA_SEGMENT_ORDER_COLUMN", "x; DROP TABLE y")
+
+    with pytest.raises(ValueError, match="plain column name"):
+        build_query(load_settings(), date(2026, 11, 19), {})
+
+
 def test_the_catalog_tables_can_be_configured(monkeypatch):
     monkeypatch.setenv("ATHENA_CATALOG_DATABASE", "my-catalog")
     monkeypatch.setenv("ATHENA_CATALOG_TABLE", "my-param")

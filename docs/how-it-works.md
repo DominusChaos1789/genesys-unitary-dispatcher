@@ -290,7 +290,11 @@ SUCCEEDED → paged `get_query_results`). The query joins the sessions table,
 the segments table and the parametric catalog (`parametrica-core`,
 `grabacion_estado = '1'`), and returns the same columns as the recordings CSV.
 Its rows are then handed to `collect_from_csv`, so they're split by
-`caso_uso_nombre` exactly like the CSV. Only `recordings` can be fed this
+`caso_uso_nombre` exactly like the CSV. A conversation belongs to one caso de
+uso only. The query keeps each conversation's first queue with recordings on
+(`row_number() OVER (PARTITION BY conversacion_id ORDER BY
+<ATHENA_SEGMENT_ORDER_COLUMN>)`), and `_csv_groups` keeps a conversation's
+first row per organization for CSVs. Only `recordings` can be fed this
 way.
 
 ### Real-time conversation events: ids for `transcript_events`

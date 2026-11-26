@@ -29,9 +29,13 @@ The query joins
   (`organizacion_id` "ORG_03" -> "org-3").
 
 So only conversations through a queue the catalog has recordings turned on
-for come back. The sessions table's year=/month=/day= partitions are the day
-the data was processed, not the day the conversation happened, so the filter
-is on `conversacion_fecha_inicio`, not on the partitions.
+for come back. A conversation that went through several such queues keeps
+only its **first** one (earliest segment, by ATHENA_SEGMENT_ORDER_COLUMN), so
+it belongs to a single caso de uso: one payload, one download.
+
+The sessions table's year=/month=/day= partitions are the day the data was
+processed, not the day the conversation happened, so the filter is on
+`conversacion_fecha_inicio`, not on the partitions.
 
 The Lambda's role needs athena:StartQueryExecution/GetQueryExecution/
 GetQueryResults/StopQueryExecution, glue:GetTable/GetPartitions on the three
@@ -58,6 +62,7 @@ FILTERS = {"cliente_prefijo": "a.cliente_prefijo", "operacion_prefijo": "a.opera
 # The catalog's organizacion_id ("ORG_03") as this Lambda's organization ("org-3").
 ORGANIZATION_EXPRESSION = "replace(lower(b.organizacion_id), '_0', '-')"
 _SAFE_VALUE = re.compile(r"^[A-Za-z0-9_-]+$")
+_SAFE_COLUMN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _ORGANIZATION = re.compile(r"^org-\d+$")
 _RUNNING_STATES = ("QUEUED", "RUNNING")
 # Athena lower-cases column aliases; the CSV export's column is "Organizacion".
@@ -94,6 +99,9 @@ def build_query(settings: Settings, day: date, filters: dict[str, str]) -> str:
     sessions = f'"{settings.athena_database}"."{settings.athena_table}"'
     segments = f'"{settings.athena_database}"."{settings.athena_segments_table}"'
     catalog = f'"{settings.athena_catalog_database}"."{settings.athena_catalog_table}"'
+    order_column = settings.athena_segment_order_column
+    if not _SAFE_COLUMN.match(order_column):
+        raise ValueError(f"ATHENA_SEGMENT_ORDER_COLUMN must be a plain column name, got {order_column!r}")
     return f"""SELECT DISTINCT
     lower(a.conversacion_id) AS conversacion_id,
     b.cola_nombre,
@@ -104,17 +112,27 @@ def build_query(settings: Settings, day: date, filters: dict[str, str]) -> str:
     {ORGANIZATION_EXPRESSION} AS Organizacion
 FROM {sessions} a
 INNER JOIN (
-    SELECT DISTINCT
-        s.conversacion_id,
-        p.bucket_nombre,
-        p.prefix_nombre,
-        p.cola_nombre,
-        p.organizacion_id,
-        p.caso_uso_nombre
-    FROM {segments} s
-    INNER JOIN (
-        SELECT * FROM {catalog} WHERE grabacion_estado = '1'
-    ) AS p ON lower(s.cola_atencion_id) = lower(p.cola_id)
+    -- Each conversation's FIRST queue with recordings on, so it belongs to
+    -- one caso de uso only (one payload, one download).
+    SELECT conversacion_id, bucket_nombre, prefix_nombre, cola_nombre, organizacion_id, caso_uso_nombre
+    FROM (
+        SELECT
+            s.conversacion_id,
+            p.bucket_nombre,
+            p.prefix_nombre,
+            p.cola_nombre,
+            p.organizacion_id,
+            p.caso_uso_nombre,
+            row_number() OVER (
+                PARTITION BY lower(s.conversacion_id)
+                ORDER BY s.{order_column} ASC, p.caso_uso_nombre ASC, p.cola_nombre ASC
+            ) AS queue_order
+        FROM {segments} s
+        INNER JOIN (
+            SELECT * FROM {catalog} WHERE grabacion_estado = '1'
+        ) AS p ON lower(s.cola_atencion_id) = lower(p.cola_id)
+    )
+    WHERE queue_order = 1
 ) AS b ON lower(a.conversacion_id) = lower(b.conversacion_id)
 WHERE {where}"""
 

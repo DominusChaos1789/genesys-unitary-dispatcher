@@ -237,12 +237,22 @@ CSV_UNKNOWN_GROUP = "CASO_USO_UNKNOWN"
 
 
 def _csv_groups(accepted: list[tuple[str, object, dict]], file_key: str) -> dict:
-    """{organization: {caso_uso_nombre: {caso_uso_nombre, bucket_nombre,
-    prefix_nombre, ids}}} off the accepted rows. Every row of one caso de uso
-    must name the same bucket and prefix -- they decide where its files go."""
+    """({organization: {caso_uso_nombre: {caso_uso_nombre, bucket_nombre,
+    prefix_nombre, ids}}}, rows dropped as already placed) off the accepted
+    rows. Every row of one caso de uso must name the same bucket and prefix --
+    they decide where its files go. A conversation belongs to ONE caso de uso
+    per organization: its first row wins (the recordings query keeps each
+    conversation's first queue already; a CSV export should be ordered the
+    same way), later rows for it under another caso de uso are dropped."""
     groups: dict[str, dict[str, dict]] = {}
+    placed: dict[tuple[str, str], str] = {}
+    duplicates = 0
     for organization_id, item, row in accepted:
         name = (row.get(CSV_GROUP_COLUMN) or "").strip() or CSV_UNKNOWN_GROUP
+        item_key = json.dumps(item, sort_keys=True)
+        if placed.setdefault((organization_id, item_key), name) != name:
+            duplicates += 1
+            continue
         fields = {field: (row.get(field) or "").strip() for field in CSV_GROUP_FIELDS}
         group = groups.setdefault(organization_id, {}).setdefault(
             name, {CSV_GROUP_COLUMN: name, **fields, "ids": {}}
@@ -252,11 +262,11 @@ def _csv_groups(accepted: list[tuple[str, object, dict]], file_key: str) -> dict
                 f"CSV {file_key!r}: {CSV_GROUP_COLUMN} {name!r} ({organization_id}) names more than one "
                 f"bucket/prefix: {[group[f] for f in CSV_GROUP_FIELDS]} and {list(fields.values())}"
             )
-        group["ids"][json.dumps(item, sort_keys=True)] = item
+        group["ids"][item_key] = item
     for by_name in groups.values():
         for group in by_name.values():
             group["ids"] = [group["ids"][key] for key in sorted(group["ids"])]
-    return groups
+    return groups, duplicates
 
 
 def _csv_conversation_column(rows: list[dict], id_kind: str, file_key: str) -> str:
@@ -323,11 +333,13 @@ def collect_from_csv(id_kind: str, rows: list[dict], file_key: str = "") -> dict
         },
     }
     if grouped:
-        outcome["groups"] = _csv_groups(accepted, file_key)
+        outcome["groups"], duplicates = _csv_groups(accepted, file_key)
         outcome["summary"][CSV_GROUP_COLUMN] = {
             org: {name: len(group["ids"]) for name, group in sorted(by_name.items())}
             for org, by_name in outcome["groups"].items()
         }
+        # Rows naming a conversation already placed under another caso de uso.
+        outcome["summary"]["rows_in_another_caso_uso"] = duplicates
     return outcome
 
 

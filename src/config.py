@@ -41,6 +41,7 @@ DEFAULT_ATHENA_WORKGROUP = "primary"
 # caso de uso and recording destination.
 DEFAULT_ATHENA_SEGMENTS_TABLE = "genesys-conversaciones-sesiones-segmentos-core"
 DEFAULT_ATHENA_CATALOG_TABLE = "parametrica-core"
+DEFAULT_ATHENA_SEGMENT_ORDER_COLUMN = "conversaciones_fecha_inicio"
 
 # TEMPORARY: Genesys organization ids (as the real-time firehose files carry
 # them) -> this Lambda's organization ids ("org-N", the org_id=N folders and
@@ -120,6 +121,9 @@ class Settings:
     athena_segments_table: str = DEFAULT_ATHENA_SEGMENTS_TABLE
     athena_catalog_database: str = ""
     athena_catalog_table: str = DEFAULT_ATHENA_CATALOG_TABLE
+    # The segments table column that orders a conversation's queues: its first
+    # queue with recordings on decides its caso de uso.
+    athena_segment_order_column: str = DEFAULT_ATHENA_SEGMENT_ORDER_COLUMN
 
     def resolve_bucket(self, name: str) -> str:
         """ "landing" -> "augusta-nexa-dev-landing"; full names pass through."""
@@ -173,4 +177,7 @@ def load_settings() -> Settings:
         athena_segments_table=os.environ.get("ATHENA_SEGMENTS_TABLE", DEFAULT_ATHENA_SEGMENTS_TABLE),
         athena_catalog_database=os.environ.get("ATHENA_CATALOG_DATABASE", f"{stack}-catalogos-curated"),
         athena_catalog_table=os.environ.get("ATHENA_CATALOG_TABLE", DEFAULT_ATHENA_CATALOG_TABLE),
+        athena_segment_order_column=os.environ.get(
+            "ATHENA_SEGMENT_ORDER_COLUMN", DEFAULT_ATHENA_SEGMENT_ORDER_COLUMN
+        ),
     )
